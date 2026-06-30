@@ -1,0 +1,35 @@
+{
+    "models": [
+        {
+            "name": "deepseek-v4-flash",
+            "enabled": true
+        },
+        {
+            "name": "deepseek-v4-pro",
+            "enabled": true
+        },
+        {
+            "name": "glm-5.1",
+            "enabled": true
+        },
+        {
+            "name": "kimi-k2.6",
+            "enabled": true
+        },
+        {
+            "name": "qwen3.7-max",
+            "enabled": true
+        },
+        {
+            "name": "qwen3.7-plus",
+            "enabled": true
+        }
+    ],
+    "scripts": [
+        "1_zero_shot_naive.py",
+        "2_few_shot.py",
+        "3_prompt_aug.py",
+        "4_mix_few_aug.py",
+        "0_4_types_inputs.py"
+    ]
+}
