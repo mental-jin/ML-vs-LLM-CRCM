@@ -1,15 +1,16 @@
+# -*- coding: utf-8 -*-
 """
-整理并统计分析脚本
+Sorting and Statistical Analysis Script
 
-功能：
-1) 读取 Excel 文件 
-2) 按 'Metastasis' 列分组，对指定变量进行组间比较：
-   - 连续变量：Shapiro 正态性检验 => t 检验 或 Mann-Whitney U 检验
-   - 分类变量：卡方检验或（2x2 且期望频数小）Fisher 精确检验
-3) 将统计结果保存为 '统计分析结果.xlsx'
+Functions:
+1) Read Excel file 
+2) Group by 'Metastasis' column, perform inter-group comparisons for specified variables:
+   - Continuous variables: Shapiro normality test => t-test or Mann-Whitney U test
+   - Categorical variables: Chi-square test or Fisher's exact test (if 2x2 and expected count is small)
+3) Save statistical results as '统计分析结果.xlsx' (Statistical_Analysis_Results.xlsx)
 
-依赖：pandas, numpy, scipy
-运行：在包含 Excel 文件的目录中运行 python 整理.py
+Dependencies: pandas, numpy, scipy
+Run: python 整理.py in the directory containing the Excel file
 """
 
 import re
@@ -28,7 +29,7 @@ OUTPUT_FILE_PATH = r'tmp/1634_terminal_analysis_results.xlsx'
 
 
 def safe_shapiro(series):
-    """对 series 做 Shapiro 检验：当样本过少或全相同时，返回 False（视为非正态）"""
+    """Perform Shapiro test on series: returns False (skewed) if samples are too few or identical."""
     if len(series) < 3:
         return False
     if np.all(series == series.iloc[0]):
@@ -41,41 +42,38 @@ def safe_shapiro(series):
 
 
 def analyze_continuous(group1, group2, all_data=None):
-    """对两个一维数值序列选择合适检验并返回统计字符串与 p 值
+    """Select appropriate test for two 1D numeric sequences and return statistical description and p-value.
     
-    参数:
-        group1: M1组数据
-        group2: M0组数据  
-        all_data: 全量数据（可选，用于计算Overall统计）
+    Parameters:
+        group1: M1 group data
+        group2: M0 group data  
+        all_data: All data (optional, used to compute Overall statistics)
     """
-    # 去除缺失
     g1 = pd.to_numeric(group1, errors='coerce').dropna()
     g2 = pd.to_numeric(group2, errors='coerce').dropna()
     if len(g1) == 0 or len(g2) == 0:
         return None
 
-    # 检查正态性
     normal = safe_shapiro(g1) and safe_shapiro(g2)
 
     if normal:
-        # t 检验（等方差默认不作假设，使用 Welch t）
+        # t-test (Welch t-test is used by default without assuming equal variance)
         stat, p = stats.ttest_ind(g1, g2, equal_var=False, nan_policy='omit')
         desc1 = f"{g1.mean():.2f}±{g1.std(ddof=1):.2f}"
         desc2 = f"{g2.mean():.2f}±{g2.std(ddof=1):.2f}"
-        # Overall 描述
         if all_data is not None:
             g_all = pd.to_numeric(all_data, errors='coerce').dropna()
             desc_all = f"{g_all.mean():.2f}±{g_all.std(ddof=1):.2f}" if len(g_all) > 0 else ""
         else:
             desc_all = ""
-        method = 't检验(Welch)'
+        method = 't-test (Welch)'
     else:
         # Mann-Whitney U
         try:
             stat, p = stats.mannwhitneyu(g1, g2, alternative='two-sided')
         except Exception:
             p = np.nan
-        # 用中位数和第25/75百分位数显示，格式为: 中位数 (第25百分位数, 第75百分位数)
+        # Display as: Median (25th percentile, 75th percentile)
         m1 = g1.median()
         q1_1 = g1.quantile(0.25)
         q3_1 = g1.quantile(0.75)
@@ -84,7 +82,6 @@ def analyze_continuous(group1, group2, all_data=None):
         q3_2 = g2.quantile(0.75)
         desc1 = f"{m1:.2f} ({q1_1:.2f}, {q3_1:.2f})"
         desc2 = f"{m2:.2f} ({q1_2:.2f}, {q3_2:.2f})"
-        # Overall 描述
         if all_data is not None:
             g_all = pd.to_numeric(all_data, errors='coerce').dropna()
             if len(g_all) > 0:
@@ -102,34 +99,30 @@ def analyze_continuous(group1, group2, all_data=None):
 
 
 def analyze_categorical(group1, group2, varname=None, all_data=None):
-    """对分类变量进行卡方或 Fisher 检验，返回各组比例描述、检验方法与 p 值
+    """Perform Chi-square or Fisher test on categorical variables, return proportions, methods, and p-values.
 
-    如果传入 varname，当 varname 为 'pT' 或 'pN' 时，按数字从高到低排序类别；
-    当 varname 为 'Differentiation_grade' 时，按 ['高中','中','中低'] 的顺序优先显示。
+    If varname is passed, categories are sorted from high to low when varname is 'pT' or 'pN'.
+    When varname is 'Differentiation_grade', they are prioritized as ['G1', 'G2', 'G3'].
     
-    参数:
-        group1: M1组数据
-        group2: M0组数据
-        varname: 变量名（用于特殊排序）
-        all_data: 全量数据（可选，用于计算Overall统计）
+    Parameters:
+        group1: M1 group data
+        group2: M0 group data
+        varname: Variable name (used for custom sorting)
+        all_data: All data (optional, used to compute Overall statistics)
     """
     g1 = group1.dropna().astype(str)
     g2 = group2.dropna().astype(str)
     if len(g1) == 0 or len(g2) == 0:
         return None
 
-    # 统计频数并构建列联表（行=类别，列=组）
     combined = pd.concat([g1, g2], axis=0)
     categories = list(pd.unique(combined))
 
-    # 根据变量名决定展示顺序
     if varname is not None:
         if varname in ('T_stage', 'N_stage'):
-            # 提取纯数字类别并按数值从高到低排序
             num_cats = [int(c) for c in categories if re.fullmatch(r"\d+", str(c))]
             num_cats = sorted(set(num_cats), reverse=True)
             ordered = [str(x) for x in num_cats]
-            # 把非数字类别放到后面（保持原顺序）
             other = [c for c in categories if not re.fullmatch(r"\d+", str(c))]
             categories = [c for c in ordered if c in categories] + [c for c in other if c not in ordered]
         elif varname == 'Differentiation_grade':
@@ -142,7 +135,6 @@ def analyze_categorical(group1, group2, varname=None, all_data=None):
         table.loc[cat, 'g1'] = int((g1 == cat).sum())
         table.loc[cat, 'g2'] = int((g2 == cat).sum())
 
-    # 计算期望频数
     try:
         chi2, p_chi, dof, expected = chi2_contingency(table.values)
     except Exception:
@@ -150,23 +142,20 @@ def analyze_categorical(group1, group2, varname=None, all_data=None):
 
     use_fisher = False
     if table.shape == (2, 2):
-        # 对 2x2 表且期望频数小于5时考虑 Fisher
         if (expected < 5).any():
             use_fisher = True
 
     if use_fisher:
         try:
-            # fisher_exact 需要 2x2 的 ndarray
             _, p = fisher_exact(table.values)
-            method = 'Fisher精确检验'
+            method = 'Fisher exact test'
         except Exception:
             p = p_chi
-            method = '卡方检验(近似)'
+            method = 'Chi-square test (approximate)'
     else:
         p = p_chi
-        method = '卡方检验'
+        method = 'Chi-square test'
 
-    # 辅助：格式化类别标签（若为数字且为整数形式则显示为整数而不是 1.0）
     def format_label(cat):
         try:
             f = float(cat)
@@ -174,12 +163,10 @@ def analyze_categorical(group1, group2, varname=None, all_data=None):
                 return str(int(f))
             else:
                 s = str(f)
-                # 去掉多余的零
                 return s.rstrip('0').rstrip('.')
         except Exception:
             return str(cat)
 
-    # 各类计数与比例（count(percentage)），确保显示每组的人数
     total1 = len(g1)
     total2 = len(g2)
     desc1_parts = []
@@ -196,7 +183,6 @@ def analyze_categorical(group1, group2, varname=None, all_data=None):
     desc1 = ', '.join(desc1_parts)
     desc2 = ', '.join(desc2_parts)
 
-    # Overall 描述（全量数据）
     if all_data is not None:
         g_all = all_data.dropna().astype(str)
         total_all = len(g_all)
@@ -214,37 +200,31 @@ def analyze_categorical(group1, group2, varname=None, all_data=None):
 
 
 def analyze_dataframe(df: pd.DataFrame, group_col: str = 'Metastasis') -> pd.DataFrame:
-    # 保险起见：将形如"/"（两侧可能有空白）的内容统一视为缺失
     df = df.copy()
     df.replace(r'^\s*/\s*$', np.nan, regex=True, inplace=True)
 
-    # 分组
     if group_col not in df.columns:
-        raise KeyError(f"未找到列 '{group_col}'，无法分组")
+        raise KeyError(f"Column '{group_col}' not found, unable to group data.")
 
-    # 强制将分组列标准化为 0/1（兼容 Excel 里为 '0'/'1'、'0.0'/'1.0'、0/1、0.0/1.0，及前后空白）
     group_raw = df[group_col]
     group_str = group_raw.astype(str).str.strip()
-    # 将字符串形式的缺失统一为 NaN
     group_str = group_str.replace({'': np.nan, 'nan': np.nan, 'NaN': np.nan, 'None': np.nan, 'NONE': np.nan})
     group_num = pd.to_numeric(group_str, errors='coerce')
 
-    # 校验：非缺失值只允许 0 或 1
     unique_vals = pd.unique(group_num.dropna())
     invalid_vals = [v for v in unique_vals if v not in (0, 1)]
     if invalid_vals:
         raise ValueError(
-            f"分组列 '{group_col}' 存在非0/1的取值: {invalid_vals}。"
-            "请先清洗该列，确保仅包含 0 或 1（缺失可为空）。"
+            f"Grouping column '{group_col}' contains non-0/1 values: {invalid_vals}. "
+            "Please clean this column first to ensure it contains only 0 or 1 (missing values can be empty)."
         )
 
     group1 = df[group_num == 1]
     group2 = df[group_num == 0]
     print(
-        f"分组完成({group_col}): M1(=1)={len(group1)} 行, M0(=0)={len(group2)} 行, 缺失={int(group_num.isna().sum())} 行"
+        f"Grouping completed({group_col}): M1(=1)={len(group1)} rows, M0(=0)={len(group2)} rows, Missing={int(group_num.isna().sum())} rows"
     )
 
-    # 3) 变量列表（按用户要求）
     continuous_vars = [
        "IgA","IgG",	"IgM",	"C3","C4","C1Q","IgE","CH50","Creatinine","Albumin","ALP","ALT",
        "AST","Direct bilirubin","GGT","LDH","Prealbumin","Glucose","AST/ALT ratio",
@@ -275,64 +255,63 @@ def analyze_dataframe(df: pd.DataFrame, group_col: str = 'Metastasis') -> pd.Dat
         "mGPS"
     ]
 
-    # 兼容性：只保留实际存在于 df 的列
     continuous_vars = [v for v in continuous_vars if v in df.columns]
     categorical_vars = [v for v in categorical_vars if v in df.columns]
 
     results = []
 
-    # 分析连续变量
+    # Analyze continuous variables
     for var in continuous_vars:
         try:
             res = analyze_continuous(group1[var], group2[var], all_data=df[var])
             if res is None:
                 continue
             results.append({
-				'变量': _display_name(var, mode="plot") or var,
+				'Variable': _display_name(var, mode="plot") or var,
                 'Overall': res['overall'],
                 'M0': res['group2'],
                 'M1': res['group1'],
-                '检验方法': res['method'],
-                'P值': ('' if pd.isna(res['p']) else f"{res['p']:.4f}"),
-                '显著性': '*' if (not pd.isna(res['p']) and res['p'] < 0.05) else ''
+                'Test Method': res['method'],
+                'P-value': ('' if pd.isna(res['p']) else f"{res['p']:.4f}"),
+                'Significance': '*' if (not pd.isna(res['p']) and res['p'] < 0.05) else ''
             })
         except Exception as e:
-            print(f"连续变量 {var} 处理出错: {e}")
+            print(f"Error processing continuous variable {var}: {e}")
 
-    # 分析分类变量
+    # Analyze categorical variables
     for var in categorical_vars:
         try:
             res = analyze_categorical(group1[var], group2[var], varname=var, all_data=df[var])
             if res is None:
                 continue
             results.append({
-				'变量': _display_name(var, mode="plot") or var,
+				'Variable': _display_name(var, mode="plot") or var,
                 'Overall': res['overall'],
                 'M0': res['group2'],
                 'M1': res['group1'],
-                '检验方法': res['method'],
-                'P值': ('' if pd.isna(res['p']) else f"{res['p']:.4f}"),
-                '显著性': '*' if (not pd.isna(res['p']) and res['p'] < 0.05) else ''
+                'Test Method': res['method'],
+                'P-value': ('' if pd.isna(res['p']) else f"{res['p']:.4f}"),
+                'Significance': '*' if (not pd.isna(res['p']) and res['p'] < 0.05) else ''
             })
         except Exception as e:
-            print(f"分类变量 {var} 处理出错: {e}")
+            print(f"Error processing categorical variable {var}: {e}")
 
     return pd.DataFrame(results)
 
 
 def analyze_excel(file_path: str, output_file_path: str, group_col: str = 'Metastasis') -> None:
-    print(f"读取文件: {file_path}")
+    print(f"Reading file: {file_path}")
     df = pd.read_excel(file_path)
     results_df = analyze_dataframe(df, group_col=group_col)
     results_df.to_excel(output_file_path, index=False)
-    print(f"统计分析完成，结果已保存到: {output_file_path}")
+    print(f"Statistical analysis completed. Results saved to: {output_file_path}")
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="分组统计分析（连续变量+分类变量）")
-    parser.add_argument("--input", default=FILE_PATH, help="输入Excel路径")
-    parser.add_argument("--output", default=OUTPUT_FILE_PATH, help="输出结果Excel路径")
-    parser.add_argument("--group_col", default='Metastasis', help="分组列名（1 vs 0）")
+    parser = argparse.ArgumentParser(description="Group Statistical Analysis (Continuous + Categorical)")
+    parser.add_argument("--input", default=FILE_PATH, help="Input Excel path")
+    parser.add_argument("--output", default=OUTPUT_FILE_PATH, help="Output results Excel path")
+    parser.add_argument("--group_col", default='Metastasis', help="Grouping column name (1 vs 0)")
     return parser.parse_args()
 
 

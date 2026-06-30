@@ -33,7 +33,7 @@ def _pretty_var_name(name: str) -> str:
     """Pretty display name: underscores -> spaces, remove trailing brackets/parentheses content."""
 
     s = str(name).replace("_", " ")
-    # Remove any trailing type hints like "（categorical）"/"（numerical）" or "(xxx)".
+    # Remove any trailing type hints like "(categorical)"/"(numerical)" or "(xxx)".
     s = re.sub(r"\s*[（(].*?[）)]\s*$", "", s)
     return s
 

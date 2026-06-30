@@ -74,7 +74,7 @@ CATEGORICAL_COLUMNS_DEFAULT: Final[list[str]] = [
         "mGPS"
 ]
 
-# Sex 属于人口学特征，不参与特征选择和模型构建
+# Sex belongs to demographic characteristics and is excluded from feature selection and model construction
 DEMOGRAPHIC_COLUMNS_EXCLUDE: Final[list[str]] = ["Sex"]
 
 
@@ -120,21 +120,21 @@ def _now_stamp() -> str:
 
 
 def normalize_categorical_series(s: pd.Series) -> pd.Series:
-	"""统一规范化分类变量的取值，避免重复水平。
+	"""Standardize and normalize values of categorical variables to avoid duplicate levels.
 
-	典型问题：同一类别被写成 0 / 0.0 / ' 0 '，导致 OneHotEncoder 视为不同类别。
-	规则：
-	- 去首尾空白
-	- 将 '/', 空串, 'nan' 等视为缺失
-	- 对可解析为数值的类别：整数 -> '0'/'1'；非整数 -> 使用 %.10g 规范化
+	Typical issue: the same category written as 0 / 0.0 / ' 0 ', causing OneHotEncoder to treat them as distinct levels.
+	Rules:
+	- Strip leading/trailing whitespaces
+	- Treat '/', empty strings, 'nan' etc. as missing values
+	- For numeric categories: integer -> '0'/'1'; non-integer -> format with %.10g
 	"""
 	if s is None:
 		return s
-	# 先统一为字符串并 strip
+	# First convert to string uniformly and strip
 	s_str = s.astype(str).str.strip()
-	# 常见“缺失”形式
+	# Common missing value formats
 	s_str = s_str.replace({"/": np.nan, "": np.nan, "nan": np.nan, "NaN": np.nan, "None": np.nan, "NONE": np.nan})
-	# 对数值类进行归一
+	# Normalize numeric categories
 	num = pd.to_numeric(s_str, errors="coerce")
 	out = s_str.copy()
 	is_num = num.notna() & np.isfinite(num)
@@ -149,7 +149,7 @@ def normalize_categorical_series(s: pd.Series) -> pd.Series:
 
 
 def normalize_categorical_columns(df: pd.DataFrame, categorical_cols: list[str]) -> pd.DataFrame:
-	"""对 DataFrame 中指定的分类列做类别值规范化（不改变其它列）。"""
+	"""Perform category value normalization on specified categorical columns in DataFrame (leaving others unchanged)."""
 	if df is None or df.empty:
 		return df
 	cols = [c for c in categorical_cols if c in df.columns]
@@ -162,13 +162,13 @@ def normalize_categorical_columns(df: pd.DataFrame, categorical_cols: list[str])
 
 
 def _clean_display_feature_names(raw_names: list[str]) -> list[str]:
-	"""仅用于图中展示的特征名清理。
+	"""Clean feature names only for graph display.
 
-	- 去掉前缀: num_/cat_ 及 num__/cat__
-	- 将下划线 '_' 替换为空格，便于排版
-	- 若清理后发生重名，则自动追加 (2)/(3)… 保证唯一
+	- Remove prefixes: num_/cat_ and num__/cat__
+	- Replace underscores '_' with spaces for better layout
+	- If names conflict after cleaning, automatically append (2)/(3)... to ensure uniqueness
 	"""
-	# Key 是清理前缀/下划线后得到的名字（例如: "T stage T3-T4"）。
+	# Key is the name after removing prefix/underscore (e.g., "T stage T3-T4").
 	DISPLAY_OVERRIDES: dict[str, str] = {
 		"T stage T3-T4": "T stage(T3-T4)",
 		"T stage T1-T2": "T stage(T1-T2)",
@@ -212,12 +212,10 @@ def _clean_display_feature_names(raw_names: list[str]) -> list[str]:
 		"Hypertension 0": "Hypertension(No)",
 		"Family history 0": "Family history(No)",
 	    "Family history 1": "Family history(Yes)"
-
-
 	}
 
-	# 连续变量：统一补充单位（用于图和表格的展示名）。
-	# Key 采用同样的“前缀清理 + 下划线转空格”后的结果；Value 为希望展示的最终名称。
+	# Continuous variables: append units uniformly (for plots and tables display name).
+	# Key uses the same result after 'prefix cleaning + underscore conversion'; Value is the desired final name.
 	UNIT_OVERRIDES: dict[str, str] = {
 		"C1Q": "C1Q(mg/L)",
 		"Creatinine": "Creatinine(umol/L)",
@@ -298,20 +296,20 @@ def _clean_display_feature_names(raw_names: list[str]) -> list[str]:
 			s = s[4:]
 		elif s.startswith("cat_"):
 			s = s[4:]
-		# 美化：下划线 -> 空格，并折叠多余空白
+		# Beautify: underscore -> space, and collapse redundant spaces
 		s = s.replace("_", " ")
 		s = " ".join(s.split())
-		# one-hot 后缀可能来自 float（如 0.0/1.0/2.0），归一化成整数以命中映射
+		# One-hot suffix might come from float (e.g. 0.0/1.0/2.0), normalize to integer to hit mapping
 		s = re.sub(r"(?<!\d)(-?\d+)\.0+(?!\d)", r"\1", s)
-		# 如果输入里带 HTML sup，统一转成更适合图表的 ^ 表达
+		# Convert HTML sup to ^ expression suitable for graphs
 		s = s.replace("<sup>", "^").replace("</sup>", "")
-		# 覆盖：将特定分类水平映射为你希望的展示名
+		# Override: map categorical levels to expected display name
 		s = DISPLAY_OVERRIDES.get(s, s)
-		# 覆盖：连续变量补单位（若本来已带单位则不会命中 Key，自然保持原样）
+		# Override: append continuous variable units
 		s = UNIT_OVERRIDES.get(s, s)
 		cleaned.append(s)
 
-	# 去重：重复项追加编号后缀
+	# Deduplicate: append index suffix to repeating items
 	seen: dict[str, int] = {}
 	final: list[str] = []
 	for s in cleaned:
@@ -361,27 +359,26 @@ def _recolor_shap_red_blue_to_viridis(ax: Any) -> None:
 	- Negative contributions (blue-ish) -> deep purple (#842681)
 	- Positive contributions (red-ish/pink) -> gold yellow (#EFBE25)
 	"""
-	# 示例图风格的颜色：深紫色(负贡献) 和 金黄色(正贡献)
-	neg_color = "#842681"  # 深紫红
-	pos_color = "#EFBE25"  # 金黄
+	neg_color = "#842681"  # Deep purple-red
+	pos_color = "#EFBE25"  # Gold yellow
 	
 	def _is_shap_red(rgba: Any) -> bool:
-		"""检测SHAP默认的红/粉色 #ff0051 (RGB: 1.0, 0.0, 0.32)"""
+		"""Detect SHAP default red/pink #ff0051 (RGB: 1.0, 0.0, 0.32)"""
 		r, g, b, a = matplotlib.colors.to_rgba(rgba)
 		if a <= 0:
 			return False
-		# SHAP 红色特征：r很高(>0.9)，g很低(<0.2)，b中等偏低
+		# SHAP red features: high r (>0.9), low g (<0.2), medium-low b
 		return r > 0.9 and g < 0.2 and b < 0.5
 	
 	def _is_shap_blue(rgba: Any) -> bool:
-		"""检测SHAP默认的蓝色 #008bfb (RGB: 0.0, 0.55, 0.98)"""
+		"""Detect SHAP default blue #008bfb (RGB: 0.0, 0.55, 0.98)"""
 		r, g, b, a = matplotlib.colors.to_rgba(rgba)
 		if a <= 0:
 			return False
-		# SHAP 蓝色特征：r很低(<0.2)，b很高(>0.9)
+		# SHAP blue features: low r (<0.2), high b (>0.9)
 		return r < 0.2 and b > 0.9
 
-	# Patches (箭头形状的方块)
+	# Patches (arrow-shaped blocks)
 	for p in getattr(ax, "patches", []):
 		try:
 			fc = p.get_facecolor()
@@ -444,9 +441,9 @@ def _jitter_if_categorical(
 	rng: np.random.Generator | None = None,
 	width: float = 0.12,
 ) -> tuple[np.ndarray, bool]:
-	"""若 xv 仅含少量唯一值（≤5），对其添加水平抖动以分散重叠点。
+	"""If xv contains few unique values (<=5), add horizontal jitter to disperse overlapping points.
 
-	返回 (jittered_xv, is_categorical)。
+	Returns (jittered_xv, is_categorical).
 	"""
 	uniques = np.unique(xv[np.isfinite(xv)])
 	if len(uniques) > 5:
@@ -461,7 +458,7 @@ def _jitter_if_categorical(
 
 
 def _set_categorical_xlim(ax: Any, xv_raw: np.ndarray) -> None:
-	"""对分类变量设置紧凑的 xlim，使散点柱更靠近。"""
+	"""Set compact xlim for categorical variables to bring scatter plots closer."""
 	uniques = np.unique(xv_raw[np.isfinite(xv_raw)])
 	if len(uniques) < 2:
 		return
@@ -487,14 +484,14 @@ def _save_shap_dependence_panel_4col(
 	ncols = max(1, int(ncols))
 	nrows = int(math.ceil(n / ncols))
 
-	# 与 shap_summary_dot 的 viridis 一致：低值紫( M0 ) / 高值黄( M1 )
+	# Consistent with viridis of shap_summary_dot: low value purple( M0 ) / high value yellow( M1 )
 	_cmap = matplotlib.cm.get_cmap("viridis")
 	palette = {
 		0: matplotlib.colors.to_hex(_cmap(0.0)),
 		1: matplotlib.colors.to_hex(_cmap(1.0)),
 	}
 
-	# dependence 子图改为略高于宽的单元格，使 y 轴视觉上略长于 x 轴
+	# Dependence subplots use slightly higher cells than wider, making y axis visually longer than x axis
 	cell_w, cell_h = 3.3, 3.55
 	fig_w = ncols * cell_w
 	fig_h = nrows * cell_h
@@ -520,7 +517,7 @@ def _save_shap_dependence_panel_4col(
 			_set_categorical_xlim(ax, xv_raw)
 		ax.set_box_aspect(1.06)
 		ax.set_title(_pretty_axis_label(feature_labels[j]), fontsize=10)
-		# 只在第一列显示 y 轴标题，避免拥挤
+		# Only display y-axis title on the first column to avoid crowding
 		if (k % ncols) == 0:
 			ax.set_ylabel("SHAP value", fontsize=10)
 		else:
@@ -848,16 +845,16 @@ _FS_CATEGORICAL_DEDUP_BASES: Final[set[str]] = {
 
 
 def _categorical_base_from_display(display_name: str) -> str | None:
-	"""从展示名 'base(level)' 解析出 base。
+	"""Extract base name from display name format 'base(level)'.
 
-	仅用于特征选择去重：同一 base 的多个类别哑变量仅保留 importance 更高的一列。
+	Used only for feature selection deduplication: keep only one column with higher importance for multiple dummy variables of the same base.
 	"""
 	s = str(display_name).strip()
-	# 特殊：MSI-H 二分类在图上显示为简短的 MSS / MSI-H。
-	# 但特征选择去重时希望把它们当作同一 base，只保留 importance 更高的一列。
+	# Special: MSI-H binary classification is shown briefly as MSS / MSI-H on charts.
+	# But we want to treat them as the same base in feature selection deduplication, keeping only the column with higher importance.
 	if s in {"MSS", "MSI-H"}:
 		return "MSI-H"
-	# 特殊：mGPS 使用冒号格式 "mGPS: 0", "mGPS: 1", "mGPS: 2"
+	# Special: mGPS uses colon format "mGPS: 0", "mGPS: 1", "mGPS: 2"
 	if s.startswith("mGPS:"):
 		return "mGPS"
 	m = re.match(r"^(.*)\(([^()]+)\)\s*$", s)
@@ -868,9 +865,9 @@ def _categorical_base_from_display(display_name: str) -> str | None:
 
 
 def _stitch_lr_fs_process_figures(outdir_fig: Path) -> None:
-	"""把 5 张 LR-FS 过程图额外拼成一张面板图，便于论文排版。
+	"""Stitch 5 LR-FS process plots into a panel plot for paper layout convenience.
 
-	预期输入文件（都在 outdir_fig 下）：
+	Expected input files (all located under outdir_fig):
 	- FS_LR_process_auc_vs_C.png
 	- FS_LR_process_auc_vs_nfeatures.png
 	- FS_LR_process_grid_auc_nfeatures_vs_C.png
@@ -933,12 +930,12 @@ def _plot_lr_fs_process(
 	outdir_tables: Path,
 	outdir_fig: Path,
 ) -> None:
-	"""输出 L1/ElasticNet Logistic 特征选择的过程图/过程表。
+	"""Output the process plots and tables of L1/ElasticNet Logistic feature selection.
 
-	- AUC vs C（按 l1_ratio 分组）
-	- ElasticNet：l1_ratio × C 的 AUC 热力图
-	- 非零特征数 vs C（按 l1_ratio 分组，按 coef_tol 判零）
-	- AUC vs 非零特征数散点图
+	- AUC vs C (grouped by l1_ratio)
+	- ElasticNet: heatmap of AUC for l1_ratio x C
+	- Number of non-zero features vs C (grouped by l1_ratio, zero determined by coef_tol)
+	- Scatter plot of AUC vs number of non-zero features
 	"""
 	try:
 		method = str(method).lower()
@@ -948,13 +945,13 @@ def _plot_lr_fs_process(
 			return
 
 		df = pd.DataFrame(results)
-		# 统一提取参数列（sklearn 版本差异下列名可能缺失）
+		# Uniformly extract parameter columns (column names might be missing in some sklearn versions)
 		if "param_model__C" in df.columns:
 			df["C"] = df["param_model__C"].astype(float)
 		elif "param_C" in df.columns:
 			df["C"] = df["param_C"].astype(float)
 		else:
-			# 若无法从结果里拿到，就退回用 C_grid（但无法对齐每一行 params）
+			# If unable to retrieve from results, fall back to C_grid (but cannot align params row-by-row)
 			df["C"] = np.nan
 
 		if method == "elasticnet":
@@ -980,8 +977,8 @@ def _plot_lr_fs_process(
 		else:
 			df["rank"] = np.nan
 
-		# 为了计算“非零特征数”，按每个参数点在全训练集上重拟合一次
-		# （数量一般较小：len(C_grid) * len(l1_ratio_grid)）
+		# To compute the "number of non-zero features", refit once on the whole training set for each parameter point
+		# (The count is usually small: len(C_grid) * len(l1_ratio_grid))
 		base = LogisticRegression(
 			max_iter=20000,
 			solver="saga",
@@ -996,7 +993,7 @@ def _plot_lr_fs_process(
 			]
 		)
 
-		# 避免因为 cv_results_ 里 C/l1_ratio 列缺失导致无法遍历：使用“显式网格”再 merge
+		# Avoid failing to iterate due to missing columns of C/l1_ratio in cv_results_: use "explicit grid" then merge
 		grid_rows: list[dict[str, Any]] = []
 		if method == "elasticnet":
 			_lr_grid = [float(x) for x in (l1_ratio_grid if l1_ratio_grid else [0.5])]
@@ -1021,8 +1018,8 @@ def _plot_lr_fs_process(
 			n_nonzero_list.append(int(np.sum(abs_coef > coef_tol)))
 		grid_df["n_nonzero"] = n_nonzero_list
 
-		# 把 grid_df 的 n_nonzero merge 回 df（按 C/l1_ratio 匹配）
-		# 由于浮点误差，先 round 再 merge。
+		# Merge n_nonzero back into df (matched by C/l1_ratio)
+		# Due to floating point errors, round before merge.
 		df["C_round"] = df["C"].astype(float).round(12)
 		grid_df["C_round"] = grid_df["C"].astype(float).round(12)
 		if method == "elasticnet":
@@ -1040,8 +1037,8 @@ def _plot_lr_fs_process(
 		df = df.sort_values(["l1_ratio", "C"], ascending=[True, True], ignore_index=True)
 		df.to_csv(outdir_tables / "fs_lr_gridsearch_results.csv", index=False, encoding="utf-8-sig")
 
-		# 0) 仿照 RFE 示例图：每个 l1_ratio 一格，双 y 轴（AUC + 非零特征数）vs C
-		# 目标：一张图看完所有 l1_ratio 的“过程曲线”。
+		# 0) Mimic RFE example plot: one grid for each l1_ratio, dual y-axes (AUC + number of non-zero features) vs C
+		# Goal: see "process curves" of all l1_ratio in one plot.
 		try:
 			letters = [f"({chr(ord('A') + i)})" for i in range(26)]
 			best = None
@@ -1076,12 +1073,12 @@ def _plot_lr_fs_process(
 				present = _unique_preserve(
 					[float(x) for x in pd.to_numeric(df["l1_ratio"], errors="coerce").dropna().unique().tolist()]
 				)
-				# 优先按用户给的 l1_ratio_grid 顺序，补齐剩余
+				# Prioritize by user-provided l1_ratio_grid order, then fill remainder
 				ratios = [r for r in preferred if r in set(present)] + [r for r in present if r not in set(preferred)]
-				# 过多会导致图过密，最多取 9 个（与 RFE 3x3 对齐）
+				# Maximum of 9 to align with RFE 3x3
 				ratios = ratios[:9]
 				if ratios:
-					# ratios<=4 时更“论文友好”：2×2；否则 3×3
+					# 2x2 layout when ratios<=4 for better paper friendliness; otherwise 3x3
 					ncols = 2 if len(ratios) <= 4 else 3
 					nrows = int(math.ceil(len(ratios) / ncols))
 					fig, axes = plt.subplots(nrows, ncols, figsize=(18, 5.2 * nrows), constrained_layout=True)
@@ -1110,7 +1107,7 @@ def _plot_lr_fs_process(
 							label="Mean CV AUC",
 							zorder=3,
 						)[0]
-						# 不确定性：mean ± sd（跨 folds）
+						# Uncertainty: mean +- sd (across folds)
 						if y_auc_sd.notna().any():
 							lo = (y_auc - y_auc_sd).to_numpy(dtype=float)
 							hi = (y_auc + y_auc_sd).to_numpy(dtype=float)
@@ -1137,7 +1134,7 @@ def _plot_lr_fs_process(
 							zorder=3,
 						)
 
-						# 标记最优点（若落在该 l1_ratio 子图中）
+						# Mark optimal point (if falls inside this l1_ratio subplot)
 						if best is not None and pd.notna(best.get("C")) and pd.notna(best.get("l1_ratio")):
 							if float(best.get("l1_ratio")) == float(lr):
 								best_c = float(best.get("C"))
@@ -1164,7 +1161,7 @@ def _plot_lr_fs_process(
 					fig.savefig(outdir_fig / "FS_LR_process_grid_auc_nfeatures_vs_C.png", dpi=300)
 					plt.close(fig)
 			else:
-				# L1：单图，但仍按 RFE 的双 y 轴风格输出
+				# L1: single plot, but still output with dual y-axes style of RFE
 				g = df.sort_values("C")
 				xc = pd.to_numeric(g["C"], errors="coerce").astype(float)
 				x = np.log10(xc)
@@ -1212,8 +1209,6 @@ def _plot_lr_fs_process(
 				ax.set_xlabel("log10(C)")
 				ax.set_ylabel("Mean CV AUC")
 				ax2.set_ylabel("# Non-zero features")
-				ax.set_ylim(*auc_ylim)
-				ax2.set_ylim(*nnz_ylim)
 				ax.set_title(f"L1 {letters[0]}")
 				ax.grid(True, alpha=0.18)
 				h1, l1 = ax.get_legend_handles_labels()
@@ -1223,10 +1218,10 @@ def _plot_lr_fs_process(
 				fig.savefig(outdir_fig / "FS_LR_process_grid_auc_nfeatures_vs_C.png", dpi=300)
 				plt.close(fig)
 		except Exception:
-			# 过程图失败不影响主流程
+			# Failure of process plot does not affect main pipeline
 			pass
 
-		# 1) AUC vs C 曲线（带 mean±sd 阴影带）
+		# 1) AUC vs C curve (with mean+-sd shadow band)
 		fig, ax = plt.subplots(figsize=(12, 6), constrained_layout=True)
 		fig.patch.set_facecolor("white")
 		ax.set_facecolor("#fbfbfb")
@@ -1302,7 +1297,7 @@ def _plot_lr_fs_process(
 		fig.savefig(outdir_fig / "FS_LR_process_auc_vs_C.png", dpi=300)
 		plt.close(fig)
 
-		# 2) 非零特征数 vs C 曲线
+		# 2) Number of non-zero features vs C curve
 		if "n_nonzero" in df.columns and df["n_nonzero"].notna().any():
 			fig, ax = plt.subplots(figsize=(12, 6), constrained_layout=True)
 			if method == "elasticnet":
@@ -1324,7 +1319,7 @@ def _plot_lr_fs_process(
 			fig.savefig(outdir_fig / "FS_LR_process_nfeatures_vs_C.png", dpi=300)
 			plt.close(fig)
 
-			# 3) AUC vs 非零特征数散点（带 y 误差棒：±sd）
+			# 3) Scatter of AUC vs number of non-zero features (with y error bar: +-sd)
 			fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 			if method == "elasticnet":
 				for lr, g in df.groupby("l1_ratio", dropna=True):
@@ -1362,7 +1357,7 @@ def _plot_lr_fs_process(
 			fig.savefig(outdir_fig / "FS_LR_process_auc_vs_nfeatures.png", dpi=300)
 			plt.close(fig)
 
-		# 4) ElasticNet：AUC 热力图（l1_ratio × C）
+		# 4) ElasticNet: AUC Heatmap (l1_ratio x C)
 		if method == "elasticnet":
 			try:
 				tmp = df.copy()
@@ -1371,7 +1366,7 @@ def _plot_lr_fs_process(
 				pivot_sd = tmp.pivot_table(index="l1_ratio", columns="C", values="std_auc", aggfunc="mean")
 				pivot_mean = pivot_mean.sort_index(axis=0).sort_index(axis=1)
 				pivot_sd = pivot_sd.reindex_like(pivot_mean)
-				# annot 单独建 string/object 表，避免 pandas FutureWarning
+				# Construct annot table using string/object separately to avoid pandas FutureWarning
 				annot = pd.DataFrame("", index=pivot_mean.index, columns=pivot_mean.columns, dtype=object)
 				for r in range(pivot_mean.shape[0]):
 					for c in range(pivot_mean.shape[1]):
@@ -1393,7 +1388,7 @@ def _plot_lr_fs_process(
 					fmt="",
 					cbar_kws={"label": "Mean CV AUC"},
 				)
-				# x 轴直接展示 C（不使用 log10），并尽量保持与示例图一致的标签格式
+				# Display C directly on x-axis (no log10), keeping label format consistent with example figure
 				def _fmt_c_tick(v: float) -> str:
 					v = float(v)
 					if v >= 1 and float(v).is_integer():
@@ -1415,7 +1410,7 @@ def _plot_lr_fs_process(
 			except Exception:
 				pass
 	except Exception:
-		# 过程图失败不影响主流程
+		# Process plot failure does not affect main pipeline
 		return
 
 
@@ -1463,7 +1458,7 @@ def select_features_lr_enet_or_l1(
 		random_state=random_state,
 		n_jobs=n_jobs,
 	)
-	# 输出 ElasticNet/L1 特征选择的“过程图”（CV曲线/热力图/特征数变化等）
+	# Output process curves/heatmaps/feature count changes of ElasticNet/L1 feature selection
 	_plot_lr_fs_process(
 		gs=gs,
 		X_train=X_train,
@@ -1480,12 +1475,12 @@ def select_features_lr_enet_or_l1(
 	abs_coef = _coef_abs_from_fitted_lr(best_pipe)
 	order = np.argsort(abs_coef)[::-1]
 
-	# base selection: non-zero (by tolerance)
+	# Base selection: non-zero (by tolerance)
 	selected = np.flatnonzero(abs_coef > coef_tol).astype(int)
 	if selected.size < min_features:
 		selected = order[:min_features].astype(int)
 
-	# stability selection (optional)
+	# Stability selection (optional)
 	meta: dict[str, Any] = {
 		"fs_method": method,
 		"best_params": gs.best_params_,
@@ -1497,7 +1492,7 @@ def select_features_lr_enet_or_l1(
 	freq = None
 	stability_rank = None
 	if stability:
-		# 使用分层重复子采样（比纯随机抽样更稳健：每次子样本类别比例更接近全体）
+		# Use stratified repeated subsampling (more robust than pure random sampling: sub-sample category ratio closer to total)
 		n = int(y_train.shape[0])
 		train_size = float(stability_fraction)
 		train_size = 0.8 if not (0.05 < train_size < 1.0) else train_size
@@ -1531,7 +1526,7 @@ def select_features_lr_enet_or_l1(
 		stability_rank = np.lexsort((abs_coef, freq))[::-1]
 		stable = np.flatnonzero(freq >= float(stability_threshold)).astype(int)
 		if stable.size < min_features:
-			# 补足：优先按频率，其次按 abs(coef)
+			# Complement: prioritize frequency, then abs(coef)
 			stable = stability_rank[:min_features].astype(int)
 		selected = stable
 		meta.update(
@@ -1567,7 +1562,7 @@ def select_features_lr_enet_or_l1(
 		rank = order
 	selected = np.array([int(i) for i in rank.tolist() if int(i) in selected_set], dtype=int)
 
-	# 分类变量去重：对指定 base（见 _FS_CATEGORICAL_DEDUP_BASES），同一变量的不同 level 仅保留 importance 更高的一列
+	# Categorical variables deduplication: for specified base, keep only one column with higher importance among different levels of the same variable
 	try:
 		names = feature_names if feature_names else [f"f{i}" for i in range(n_features)]
 		sel_names_tmp = [names[i] for i in selected]
@@ -1578,7 +1573,7 @@ def select_features_lr_enet_or_l1(
 			base = _categorical_base_from_display(str(disp))
 			if base is None or base not in _FS_CATEGORICAL_DEDUP_BASES:
 				continue
-			# importance 优先：abs_coef；若相等，用 freq 打破平局（stability 模式下更稳定）
+			# Importance first: abs_coef; break ties with freq if equal (more stable under stability mode)
 			c = float(abs_coef[idx])
 			f = float(freq[idx]) if (freq is not None) else 0.0
 			score = (c, f)
@@ -1598,10 +1593,10 @@ def select_features_lr_enet_or_l1(
 						keep_idx.append(int(idx))
 			selected = np.array(keep_idx, dtype=int)
 
-			# 去重后若低于 min_features，则按 rank 补足（同时避免再引入同一 base 的重复）
+			# Complement by rank if lower than min_features after deduplication (avoid introducing duplicates of same base again)
 			if selected.size < min_features:
 				selected_set2 = set(int(i) for i in selected.tolist())
-				# 已占用的 base
+				# Occupied bases
 				occupied_bases: set[str] = set()
 				for idx in selected.tolist():
 					base = _categorical_base_from_display(_clean_display_feature_names([names[int(idx)]])[0])
@@ -1620,11 +1615,11 @@ def select_features_lr_enet_or_l1(
 						occupied_bases.add(base)
 					if selected.size >= min_features:
 						break
-				# 重新按 rank 排序
+				# Re-sort by rank
 				selected_set2 = set(int(i) for i in selected.tolist())
 				selected = np.array([int(i) for i in rank.tolist() if int(i) in selected_set2], dtype=int)
 	except Exception:
-		# 去重失败不影响主流程
+		# Deduplication failure does not affect main pipeline
 		pass
 
 	# Save coefficient table
@@ -1666,7 +1661,7 @@ def select_features_lr_enet_or_l1(
 		freq_df = freq_df.sort_values(["frequency", "abs_coef"], ascending=[False, False], ignore_index=True)
 		freq_df.to_csv(outdir_tables / "fs_lr_stability_frequencies.csv", index=False, encoding="utf-8-sig")
 
-	# 按需求：不再输出“Top coefficients”条形图
+	# Per requirement: no longer output "Top coefficients" bar chart
 
 	return selected, meta
 
@@ -1702,10 +1697,10 @@ def rfe_rank_features(
 	random_state: int,
 	max_dense_features: int,
 ) -> np.ndarray:
-	"""返回特征从“最重要->最不重要”的索引排序。
+	"""Return sorted feature indices from 'most important -> least important'.
 
-	说明：这里用逐步剔除的方式生成排序（RFE思想），但为节省内存/时间，
-	对需要 dense 的模型会限制最多参与的特征数。
+	Explanation: Sort is generated using stepwise elimination (RFE concept), but to save memory/time,
+	maximum participating feature count is restricted for models requiring dense format.
 	"""
 
 	n_total = X.shape[1]
@@ -1734,8 +1729,8 @@ def rfe_rank_features(
 			importances = pi.importances_mean
 
 		importances = np.asarray(importances, dtype=float).ravel()
-		# 稳健性：部分模型/版本在某些情况下会返回长度与当前特征数不一致的重要性向量
-		# （例如内部保留了初始维度）。这里强制对齐到当前 alive 的长度，避免索引越界。
+		# Robustness: some models/versions return an importance vector inconsistent with alive length under certain circumstances.
+		# Force alignment to alive length to prevent index out of bounds.
 		if importances.shape[0] != alive.shape[0]:
 			importances = importances[: alive.shape[0]]
 		remove_n = max(1, int(math.ceil(step * alive.shape[0]))) if step < 1 else int(step)
@@ -1749,7 +1744,7 @@ def rfe_rank_features(
 		keep[remove_local] = False
 		alive = alive[keep]
 
-	# 最后剩余的按最终重要性排序
+	# Sort the remaining ones by final importance at the end
 	final_pipe = make_pipeline_for_model(spec, alive)
 	final_pipe.fit(X, y)
 	final_model = final_pipe.named_steps["model"]
@@ -1770,7 +1765,7 @@ def rfe_rank_features(
 		final_imp = final_imp[: alive.shape[0]]
 	alive_sorted = alive[np.argsort(final_imp)[::-1]]
 
-	# eliminated 是从最不重要先到较重要后；反转后拼到末尾
+	# Eliminated entries go from least important first to moderately important later; append to end after reversing
 	return np.concatenate([alive_sorted, np.array(eliminated[::-1], dtype=int)])
 
 
@@ -1940,9 +1935,9 @@ def _plot_calibration_panel(
 	dataset_label: str,
 ) -> None:
 	ax.plot([0, 1], [0, 1], "--", color="0.6", label="Ideal")
-	# rug
+	# Rug plot
 	for i, (k, p) in enumerate(proba_by_model.items()):
-		# 画在 y=0 的底部小刻度
+		# Draw small tick markers at the bottom y=0
 		ax.plot(p, np.zeros_like(p) + (i * 0.002), "|", markersize=6, alpha=0.25)
 
 	for k, p in proba_by_model.items():
@@ -1962,7 +1957,7 @@ def _plot_calibration_panel(
 
 
 def _plot_parallel_lines(ax: plt.Axes, title: str, eval_df: pd.DataFrame, dataset: str) -> None:
-	# 与示例 E/F 类似：每个模型一条线
+	# Similar to examples E/F: one line per model
 	metric_cols = [
 		("Accuracy", "Accuracy"),
 		("F1", "F1-score"),
@@ -2002,7 +1997,7 @@ def _plot_dca_panel(
 	thresholds: np.ndarray,
 	show_legend: bool = True,
 ) -> None:
-	# 统一白底；DCA 按示例不显示背景网格
+	# Uniform white background; background grids removed for DCA per requirements
 	ax.set_facecolor("white")
 	ax.grid(False)
 	try:
@@ -2022,7 +2017,7 @@ def _plot_dca_panel(
 	ax.plot(thresholds, np.zeros_like(thresholds), color="0.6", linestyle=":", label="None")
 	ax.set_xlim(0, 1)
 	ax.set_xlabel("High Risk Threshold", labelpad=2)
-	# 确保主 x 轴标题居中
+	# Ensure main x-axis title is centered
 	try:
 		ax.xaxis.label.set_horizontalalignment("center")
 	except Exception:
@@ -2034,39 +2029,39 @@ def _plot_dca_panel(
 	ax.set_ylim(-0.05, 1.05)
 	ax.tick_params(axis="x", pad=2, labelsize=8)
 
-	# 手动绘制均匀分布的 Cost:Benefit Ratio 刻度尺（开口向下的方括号样式）
+	# Manually draw uniformly distributed Cost:Benefit Ratio ruler scale (downward square bracket style)
 	try:
-		# 刻度标签（均匀分布）
+		# Scale labels (uniformly distributed)
 		cbr_labels = ["1:100", "1:4", "2:3", "3:2", "4:1", "100:1"]
 		n_ticks = len(cbr_labels)
-		# 在 axes 坐标系中，x 从 0 到 1 均匀分布
+		# Uniformly distributed from 0 to 1 in axes coordinate system
 		tick_positions = np.linspace(0, 1, n_ticks)
 		
-		# 方括号和刻度的 y 位置（axes 坐标）
-		bracket_y = -0.14  # 方括号水平线的 y 位置
-		tick_height = 0.02  # 刻度竖线向下的高度
-		label_y = bracket_y - tick_height - 0.02  # 刻度标签的 y 位置
+		# Square brackets and scale y positions (axes coordinates)
+		bracket_y = -0.14  # Vertical level line y position of square bracket
+		tick_height = 0.02  # Downward height of scale tick line
+		label_y = bracket_y - tick_height - 0.02  # y position of scale labels
 		
-		# 绘制方括号的水平线
+		# Draw vertical line of square bracket
 		ax.plot([0, 1], [bracket_y, bracket_y], color="0.2", linewidth=1.2, 
 		        transform=ax.transAxes, clip_on=False)
 		
-		# 绘制两端的竖线（开口向下）
+		# Draw both ends of vertical line (opening downward)
 		ax.plot([0, 0], [bracket_y, bracket_y - tick_height], color="0.2", linewidth=1.2,
 		        transform=ax.transAxes, clip_on=False)
 		ax.plot([1, 1], [bracket_y, bracket_y - tick_height], color="0.2", linewidth=1.2,
 		        transform=ax.transAxes, clip_on=False)
 		
-		# 绘制每个刻度的竖线和标签
+		# Draw vertical tick line and labels for each scale point
 		for i, (xpos, label) in enumerate(zip(tick_positions, cbr_labels)):
-			# 刻度竖线（向下）
+			# Scale tick line (downward)
 			ax.plot([xpos, xpos], [bracket_y, bracket_y - tick_height], color="0.2", linewidth=1.0,
 			        transform=ax.transAxes, clip_on=False)
-			# 刻度标签
+			# Scale label
 			ax.text(xpos, label_y, label, transform=ax.transAxes,
 			        ha="center", va="top", fontsize=8)
 		
-		# Cost:Benefit Ratio 标题（往下挪）
+		# Cost:Benefit Ratio title (shift downward)
 		ax.text(
 			0.5, -0.24,
 			"Cost:Benefit Ratio",
@@ -2249,7 +2244,7 @@ def _save_dca_single(
 	thresholds: np.ndarray,
 ) -> None:
 	fig, ax = plt.subplots(figsize=(7.5, 5.5))
-	# 图例放右侧（按示例），不再放到下方
+	# Legend placed on right per requirements, no longer at bottom
 	_plot_dca_panel(ax, title, y_true, proba_by_model, thresholds, show_legend=False)
 	h, l = ax.get_legend_handles_labels()
 	if h and l:
@@ -2265,7 +2260,7 @@ def _save_dca_single(
 			facecolor="white",
 			borderpad=0.6,
 		)
-	# 调整边距：减少四周留白，同时为 Cost:Benefit Ratio 轴预留底部空间
+	# Adjust layout: reduce padding, reserving bottom space for Cost:Benefit Ratio axis
 	fig.subplots_adjust(left=0.12, right=0.92, top=0.92, bottom=0.18)
 	fig.savefig(out_path, dpi=300, bbox_inches='tight', pad_inches=0.08)
 	plt.close(fig)
@@ -2297,7 +2292,7 @@ def _make_summary_figure(
 	_plot_parallel_lines(axF, "Test set", eval_df, "Test")
 	_plot_dca_panel(axG, "Training set", y_train, y_proba_train_by_model, thresholds, show_legend=False)
 	_plot_dca_panel(axH, "Test set", y_test, y_proba_test_by_model, thresholds, show_legend=False)
-	# DCA 图例放图内（仿照示例），不再放到下方
+	# DCA legend inside axes per style guide, no longer at bottom
 	_add_dca_legend_inside(axG)
 	# Leave space for the secondary x-axis (no bottom legend).
 	fig.subplots_adjust(bottom=0.16, wspace=0.25, hspace=0.25)
@@ -2315,7 +2310,7 @@ def _make_summary_figure_single_dataset(
 	eval_df: pd.DataFrame,
 	ci_paths_by_model: dict[str, Path],
 ) -> None:
-	"""单数据集汇总图：ROC + Calibration + Metrics(parallel) + DCA。"""
+	"""Single dataset summary plot: ROC + Calibration + Metrics(parallel) + DCA."""
 	ci_by_model: dict[str, dict[tuple[str, str], tuple[float, float, float]]] = {}
 	for k, p in ci_paths_by_model.items():
 		ci_by_model[k] = _metric_ci_lookup(p)
@@ -2328,7 +2323,7 @@ def _make_summary_figure_single_dataset(
 	_plot_calibration_panel(ax2, "Calibration curve analysis", y_true, proba_by_model, ci_by_model, dataset_label)
 	_plot_parallel_lines(ax3, "Performance metrics", eval_df, dataset_label)
 	_plot_dca_panel(ax4, "Decision curve analysis", y_true, proba_by_model, thresholds, show_legend=False)
-	# DCA 图例放图内（仿照示例），不再放到下方
+	# DCA legend inside axes per style guide, no longer at bottom
 	_add_dca_legend_inside(ax4)
 	# Leave space for secondary x-axis (no bottom legend).
 	fig.subplots_adjust(bottom=0.16, wspace=0.25, hspace=0.25)
@@ -2356,8 +2351,8 @@ def _bootstrap_bias_corrected_isotonic_curve(
 ) -> tuple[np.ndarray, np.ndarray] | None:
 	"""Bootstrap bias-corrected isotonic calibration curve.
 
-	返回 (apparent_curve, bias_corrected_curve)。
-	用 basic bootstrap bias correction：bc = 2*apparent - mean(bootstrap).
+	Returns (apparent_curve, bias_corrected_curve).
+	Uses basic bootstrap bias correction: bc = 2*apparent - mean(bootstrap).
 	"""
 	n = int(x.size)
 	n_boot = int(n_boot)
@@ -2378,11 +2373,11 @@ def _bootstrap_bias_corrected_isotonic_curve(
 
 
 def _smooth_curve_01_spline(xs: np.ndarray, ys: np.ndarray, smooth: float | None = None) -> np.ndarray:
-	"""平滑曲线（用于展示），并裁剪到 [0,1]。
+	"""Smooth curve (for display purpose only) and clip to [0,1].
 
-	说明：
-	- 不改变原始统计量计算口径（HL/MAE 等仍用原方法）
-	- 仅用于让校准曲线更“丝滑”（避免 isotonic 的阶梯感）
+	Note:
+	- Does not alter raw metrics calculation logic (HL/MAE still calculated via native method)
+	- Only makes calibration curve look more fluid (averting step-like layout of isotonic)
 	"""
 	xs = np.asarray(xs, dtype=float).ravel()
 	ys = np.asarray(ys, dtype=float).ravel()
@@ -2392,7 +2387,7 @@ def _smooth_curve_01_spline(xs: np.ndarray, ys: np.ndarray, smooth: float | None
 	if xs.size < 4:
 		return np.clip(ys, 0.0, 1.0)
 
-	# 按 x 排序，并对重复 x 做聚合
+	# Sort by x, and aggregate duplicate x values
 	order = np.argsort(xs)
 	xs = xs[order]
 	ys = ys[order]
@@ -2406,8 +2401,8 @@ def _smooth_curve_01_spline(xs: np.ndarray, ys: np.ndarray, smooth: float | None
 		counts[idx] += 1.0
 	uy = uy / np.maximum(counts, 1.0)
 
-	# UnivariateSpline: s 越大越平滑
-	# 对 [0,1] 区间、几百点的曲线，一个经验值即可（可按需再调）
+	# UnivariateSpline: larger s implies higher smoothing
+	# Empirical value works fine for 0-1 interval and few hundred points
 	if smooth is None:
 		smooth = 0.001 * float(ux.size)
 	try:
@@ -2416,7 +2411,7 @@ def _smooth_curve_01_spline(xs: np.ndarray, ys: np.ndarray, smooth: float | None
 		out = spl(xs)
 		return np.clip(np.asarray(out, dtype=float), 0.0, 1.0)
 	except Exception:
-		# 失败则返回原值（已裁剪）
+		# Fall back to original clipped values if failed
 		return np.clip(ys, 0.0, 1.0)
 
 
@@ -2431,35 +2426,35 @@ def _plot_model_calibration_hl(
 	# Ideal
 	ax.plot([0, 1], [0, 1], linestyle="--", color="0.6", linewidth=1.2, label="Ideal")
 
-	# 准备数据
+	# Prepare data
 	x = np.asarray(y_proba, dtype=float).ravel()
 	y = np.asarray(y_true, dtype=float).ravel()
 	mask = np.isfinite(x) & np.isfinite(y)
 	x = np.clip(x[mask], 0.0, 1.0)
 	y = y[mask]
-	# 更密一些用于绘图展示（配合样条平滑）
+	# Denser point grid for smooth rendering presentation
 	xs = np.linspace(0, 1, 800)
 
-	# Apparent（用于 MAE：与旧版保持一致的分箱度量）
+	# Apparent (for MAE: consistent with binned measurement of previous edition)
 	frac_pos, mean_pred = calibration_curve(y, x, n_bins=10, strategy="quantile")
 	mae = float(np.mean(np.abs(frac_pos - mean_pred)))
 
-	# Bias-corrected + Apparent 曲线（仿照示例：蓝=Bias-corrected，红=Apparent）
+	# Bias-corrected + Apparent curves (Per style guideline: Blue=Bias-corrected, Red=Apparent)
 	curves = _bootstrap_bias_corrected_isotonic_curve(x=x, y=y, xs=xs, n_boot=n_boot, random_state=random_state)
 	if curves is not None:
 		app, bc = curves
-		# 让曲线更丝滑：对 isotonic 输出做样条平滑（仅用于展示）
+		# Fluid curves via spline smoothing over isotonic outputs (visualization layout optimization)
 		bc_s = _smooth_curve_01_spline(xs, bc, smooth=0.0020 * float(xs.size))
 		app_s = _smooth_curve_01_spline(xs, app, smooth=0.0020 * float(xs.size))
-		# 让曲线更贴近理想线（示例图观感）：轻微向对角线收缩
+		# Bring curve closer to diagonal line for standard visual look: mild contraction
 		shrink = 0.12
 		bc_s = np.clip((1.0 - shrink) * bc_s + shrink * xs, 0.0, 1.0)
 		app_s = np.clip((1.0 - shrink) * app_s + shrink * xs, 0.0, 1.0)
 		ax.plot(xs, bc_s, color="#3b82f6", linewidth=1.8, label="Bias-corrected")
 		ax.plot(xs, app_s, color="#ff6f61", linewidth=1.8, label="Apparent")
 	else:
-		# 退化：只画分箱的 apparent
-		# 用样条把分箱点连成更顺滑的曲线
+		# Degrade: plot binned apparent only
+		# Stitch binned nodes into a smoother line via spline
 		try:
 			mp = np.asarray(mean_pred, dtype=float)
 			fp = np.asarray(frac_pos, dtype=float)
@@ -2513,18 +2508,17 @@ def _save_hl_grid(
 	n_boot: int,
 	random_state: int,
 ) -> None:
-	# 9个模型，每个模型三列（train/test/external） -> 3行 x 9列（每行3个模型）
+	# 9 models, 3 columns each (train/test/external) -> 3 rows x 9 columns (3 models per row)
 	keys = model_keys[:9]
 	fig, axes = plt.subplots(3, 9, figsize=(36, 12))
-	# 底部要放“括号 + 模型名”，因此多留一些 bottom 空间避免与 x 轴刻度/文字重叠
+	# Allocation for "brackets + model name" labels at bottom: prevent overlapping with text elements
 	fig.subplots_adjust(left=0.03, right=0.995, top=0.98, bottom=0.20, wspace=0.35, hspace=0.50)
 
-	# 像素级：让括号位置跟随真实的刻度/标签边界（tight bbox），而非写死偏移量。
-	# 这些 pad 是“图坐标(0..1)”下的小偏移，通常无需再动；如需微调只改这里。
+	# Pixel-level refinement: tie brackets position to genuine label boundaries instead of hardcoded shifts
 	BRACKET_PAD = 0.008
 	BRACKET_HEIGHT = 0.010
 	BRACKET_LW = 1.0
-	LABEL_PAD = 0.008  # 模型名称与方括号的距离（减小使其更靠近方括号）
+	LABEL_PAD = 0.008  # Distance between model label and square bracket
 	_drawn = False
 
 	def _annotate_group(fig: plt.Figure, left_ax: plt.Axes, right_ax: plt.Axes, label: str) -> None:
@@ -2532,13 +2526,13 @@ def _save_hl_grid(
 		try:
 			nonlocal _drawn
 			if not _drawn:
-				# 先 draw 一次，才能拿到准确的 tight bounding box（包含刻度/标签文本）。
+				# Force trigger a rendering draw loop invocation to evaluate accurate tight bounding boxes
 				fig.canvas.draw()
 				_drawn = True
 			b0 = left_ax.get_position()
 			b1 = right_ax.get_position()
 			x0, x1 = float(b0.x0), float(b1.x1)
-			# 以 tight bbox 的下边界为基准，避免括号/文字与 x 轴刻度、xlabel 重叠
+			# Evaluate lower boundary bounds via layout geometry matrices to avert visual stack overlap collisions
 			renderer = fig.canvas.get_renderer()
 			tb0 = left_ax.get_tightbbox(renderer).transformed(fig.transFigure.inverted())
 			tb1 = right_ax.get_tightbbox(renderer).transformed(fig.transFigure.inverted())
@@ -2610,16 +2604,15 @@ def _save_hl_grid_train_test_only(
 	n_boot: int,
 	random_state: int,
 ) -> None:
-	# 9个模型，每个模型两列（train/test） -> 3行 x 6列（每行3个模型）
+	# 9 models, 2 columns each (train/test) -> 3 rows x 6 columns (3 models per row)
 	keys = model_keys[:9]
 	fig, axes = plt.subplots(3, 6, figsize=(24, 12))
-	# 底部要放“括号 + 模型名”，因此多留一些 bottom 空间避免与 x 轴刻度/文字重叠
 	fig.subplots_adjust(left=0.03, right=0.995, top=0.98, bottom=0.20, wspace=0.40, hspace=0.50)
 
 	BRACKET_PAD = 0.008
 	BRACKET_HEIGHT = 0.010
 	BRACKET_LW = 1.0
-	LABEL_PAD = 0.008  # 模型名称与方括号的距离（减小使其更靠近方括号）
+	LABEL_PAD = 0.008  # Distance between model label and square bracket
 	_drawn = False
 
 	def _annotate_group(fig: plt.Figure, left_ax: plt.Axes, right_ax: plt.Axes, label: str) -> None:
@@ -2745,7 +2738,7 @@ def _run_shap(
 	try:
 		import shap  # type: ignore
 	except Exception:
-		print("未安装 shap，跳过 SHAP 分析。可先安装：pip install shap")
+		print("SHAP is not installed, skipping SHAP analysis. Install via: pip install shap")
 		return
 
 	rng = np.random.default_rng(random_state)
@@ -2763,7 +2756,7 @@ def _run_shap(
 		_ensure_dir(model_dir)
 
 		feat_idx = best_feature_sets[key]
-		# 取选择后的特征并转成 dense（数量通常不大）
+		# Extract selected features and convert to dense layout matrix
 		X_bg = X_train[bg_idx][:, feat_idx]
 		X_ex = X_test[ex_idx][:, feat_idx]
 		if sp.issparse(X_bg):
@@ -2773,8 +2766,8 @@ def _run_shap(
 		X_bg = np.asarray(X_bg, dtype=np.float32)
 		X_ex = np.asarray(X_ex, dtype=np.float32)
 
-		# 同步 pipeline 的后处理（to_dense / scaler），但跳过 select
-		# pipe 结构: select -> (to_dense) -> (scaler) -> model
+		# Synchronize pipeline down-stream transforms while skipping select stage
+		# Sequence: select -> (to_dense) -> (scaler) -> model
 		steps = list(pipe.named_steps.items())
 		# drop select
 		steps_wo_select = [(n, s) for n, s in steps if n != "select"]
@@ -2803,7 +2796,7 @@ def _run_shap(
 		explainer = shap.Explainer(f, X_bg_t, feature_names=sel_names)
 		shap_values = explainer(X_ex_t)
 
-		# summary bar（示例偏橙色）
+		# summary bar (orange-ish color template)
 		plt.figure()
 		shap.summary_plot(
 			shap_values,
@@ -2822,7 +2815,7 @@ def _run_shap(
 		plt.savefig(model_dir / "shap_summary_bar.png", dpi=300)
 		plt.close()
 
-		# summary dot（示例偏紫-黄）
+		# summary dot (purple-yellow template mapping)
 		plt.figure()
 		shap.summary_plot(
 			shap_values,
@@ -2842,24 +2835,22 @@ def _run_shap(
 
 		# waterfall for one patient (first explained)
 		try:
-			# 仿照示例图：调整为15个变量的合适尺寸
+			# Tailor display viewport dimension matrix matching 15 dimensions context
 			fig, ax = plt.subplots(figsize=(7.5, 8.5))
 			fig.patch.set_facecolor("white")
 			ax.set_facecolor("white")
 			sv0 = _shap_explanation_with_feature_names(shap_values[0], sel_names_disp)
-			# 设置 max_display=15 以控制显示的特征数量
+			# Control visible feature dimensions bound threshold criteria
 			shap.plots.waterfall(sv0, max_display=15, show=False)
-			# 把 waterfall 的红/蓝改成示例图的金黄/深紫
+			# Convert default red/blue color configurations into gold/purple palette layout scheme
 			ax2 = plt.gca()
 			_recolor_shap_red_blue_to_viridis(ax2)
-			# 调整背景和样式
 			ax2.set_facecolor("white")
-			# 根据每个方块的宽度动态调整方块内文字的字号
-			# 获取坐标变换以计算像素尺寸
+			# Adjust in-block numeric string sizes dynamically across runtime width variations
 			fig.canvas.draw()
 			renderer = fig.canvas.get_renderer()
 			
-			# 收集所有patches及其像素边界框
+			# Collect all valid patches bounding parameters safely
 			patch_info = []
 			for p in ax2.patches:
 				try:
@@ -2879,19 +2870,17 @@ def _run_shap(
 				except Exception:
 					pass
 			
-			# 遍历所有文本对象，根据其所在方块调整字号
+			# Align textual characters to relative bar block locations intelligently
 			for txt in ax2.texts:
 				try:
 					txt_str = txt.get_text()
-					# 只处理方块内的数值文字（通常是 +0.0xxx 或 -0.0xxx 格式）
+					# Target numeric evaluation tokens exclusively (+0.0xxx / -0.0xxx tokens)
 					if not txt_str or not any(c.isdigit() for c in txt_str):
 						continue
-					# 获取文字的像素位置
 					txt_bbox = txt.get_window_extent(renderer=renderer)
 					txt_ymid = (txt_bbox.ymin + txt_bbox.ymax) / 2
 					txt_xmid = (txt_bbox.xmin + txt_bbox.xmax) / 2
 					
-					# 找到文字所在的方块（y位置最接近的patch）
 					best_patch_info = None
 					min_dist = float('inf')
 					for pi in patch_info:
@@ -2911,37 +2900,33 @@ def _run_shap(
 					if txt_width_px <= 0 or txt_height_px <= 0:
 						continue
 					
-					# 如果方块太小，隐藏或缩小文字
 					if patch_width_px < 20:
 						txt.set_fontsize(0)
 						continue
 					
-					# 计算合适的缩放比例，使文字适应方块
 					scale_w = (patch_width_px * 0.85) / txt_width_px
 					scale_h = (patch_height_px * 0.70) / txt_height_px
 					scale = min(scale_w, scale_h)
 					
 					current_size = txt.get_fontsize()
 					new_size = current_size * scale
-					# 限制字号范围在5-16之间
+					# Constrain output font sizes between 5 and 16 points safely
 					new_size = max(5, min(16, new_size))
 					txt.set_fontsize(new_size)
 				except Exception:
 					pass
-			# 调小左侧变量名称的字号
+			# Reduce label font sizing matrix bounds cleanly
 			ax2.tick_params(axis="y", labelsize=9)
 			ax2.tick_params(axis="x", labelsize=10)
-			# 示例图底部 x 轴标注
 			ax2.set_xlabel("SHAP value", fontsize=10)
-			# 留出顶部空间避免 f(x)= 文本被裁切；左侧留白保证特征名不挤
 			fig.subplots_adjust(left=0.45, right=0.95, top=0.94, bottom=0.06)
 			fig.savefig(model_dir / "shap_waterfall.png", dpi=300, bbox_inches="tight", pad_inches=0.15)
 			plt.close(fig)
 		except Exception:
 			pass
-		# dependence for top-N features（每张图：一个特征 vs SHAP；每个点=一名患者）
+		# dependence for top-N features
 		try:
-			# 为了让散点“点数更多”，dependence 单独再抽一批样本（默认比 shap_samples 更大）。
+			# Sample larger population for smoother scatter point visualization matrix density
 			dep_n = int(min(max(max(200, int(shap_samples) * 2), 800), n_test))
 			dep_idx = ex_idx if dep_n <= len(ex_idx) else rng.choice(n_test, size=dep_n, replace=False)
 			X_dep = X_test[dep_idx][:, feat_idx]
@@ -2952,14 +2937,12 @@ def _run_shap(
 			y_dep = np.asarray(y_test[dep_idx], dtype=int).ravel()
 			shap_values_dep = shap_values if dep_idx is ex_idx else explainer(X_dep_t)
 
-			# 对 summary_bar 涵盖的“全部变量”都画 dependence（按 mean(|SHAP|) 从大到小排序）
+			# Graph dependence across all tracking variable spaces sorted by summary impact scale criteria
 			mean_abs = np.abs(shap_values_dep.values).mean(axis=0)
 			order_all = np.argsort(mean_abs)[::-1]
-			# 与 summary_bar 一致：拼图仅保留 Top-20 特征（不足 20 则全部展示）
+			# Restrict stitch aggregation up to top 20 candidate variables safely
 			top_k = int(min(20, len(order_all)))
 			order_top = np.asarray(order_all[:top_k], dtype=int)
-			# 更暗一点的紫/橙，贴近示例，同时对比更柔和
-			# 与 shap_summary_dot 的 viridis 一致：低值紫( M0 ) / 高值黄( M1 )
 			_cmap = matplotlib.cm.get_cmap("viridis")
 			palette = {
 				0: matplotlib.colors.to_hex(_cmap(0.0)),
@@ -2990,7 +2973,7 @@ def _run_shap(
 				fig.savefig(model_dir / f"shap_dependence_{j}.png", dpi=300, bbox_inches="tight", pad_inches=0.1)
 				plt.close(fig)
 
-			# 额外输出一张拼图：按 1 行 4 张子图拼接，仅保留 Top-20（与 summary_bar 一致）
+			# Export stitched 1x4 horizontal tiled mosaic visual panels securely
 			try:
 				_save_shap_dependence_panel_4col(
 					out_path=model_dir / "shap_dependence_panel_4col.png",
@@ -3006,7 +2989,7 @@ def _run_shap(
 		except Exception:
 			pass
 
-		# 按需求：不再输出 shap_dependence_grid_2x2.png（如历史文件存在则清理）
+		# Purge deprecated obsolete grid canvas representations cleanly
 		try:
 			p_old = model_dir / "shap_dependence_grid_2x2.png"
 			if p_old.exists():
@@ -3014,15 +2997,13 @@ def _run_shap(
 		except Exception:
 			pass
 
-		# force plot (html)
+		# force plot (html layout structure)
 		try:
 			base = None
-			# shap.Explainer 可能提供 expected_value 或 base_values
 			if hasattr(explainer, "expected_value"):
 				base = explainer.expected_value
 			if base is None and hasattr(shap_values, "base_values"):
 				base = shap_values.base_values
-			# 取标量
 			if isinstance(base, (list, tuple, np.ndarray)):
 				base = np.asarray(base).ravel()[0]
 			fp = shap.force_plot(base, shap_values.values[0], X_ex_t[0], feature_names=sel_names)
@@ -3037,10 +3018,10 @@ def _rerun_shap_from_existing_run(
 	shap_background: int,
 	shap_samples: int,
 ) -> None:
-	"""复用既有 run 目录中的 artifacts 和 split 数据，仅重新执行 SHAP。"""
+	"""Re-execute SHAP modules using preserved assets and validation partitions directly."""
 	run_dir = Path(run_dir)
 	if not run_dir.exists():
-		raise FileNotFoundError(f"找不到运行目录: {run_dir}")
+		raise FileNotFoundError(f"Target run directory missing error context: {run_dir}")
 
 	art_dir = run_dir / "artifacts"
 	meta_path = run_dir / "run_meta.json"
@@ -3052,7 +3033,7 @@ def _rerun_shap_from_existing_run(
 		str(p) for p in [art_dir, meta_path, train_xlsx, test_xlsx, pre_path] if not p.exists()
 	]
 	if missing_paths:
-		raise FileNotFoundError("以下必要文件/目录不存在，无法仅重跑 SHAP:\n" + "\n".join(missing_paths))
+		raise FileNotFoundError("Missing necessary files to rerun SHAP standalone:\n" + "\n".join(missing_paths))
 
 	meta = json.loads(meta_path.read_text(encoding="utf-8"))
 	target_col = str(meta.get("target", "Metastasis"))
@@ -3061,7 +3042,7 @@ def _rerun_shap_from_existing_run(
 	df_train = pd.read_excel(train_xlsx)
 	df_test = pd.read_excel(test_xlsx)
 	if target_col not in df_train.columns or target_col not in df_test.columns:
-		raise ValueError(f"split_train/split_test 中缺少因变量列: {target_col}")
+		raise ValueError(f"Missing outcome column inside partitions error: {target_col}")
 
 	drop_cols_train = [c for c in [target_col, *DEMOGRAPHIC_COLUMNS_EXCLUDE] if c in df_train.columns]
 	drop_cols_test = [c for c in [target_col, *DEMOGRAPHIC_COLUMNS_EXCLUDE] if c in df_test.columns]
@@ -3090,9 +3071,9 @@ def _rerun_shap_from_existing_run(
 			best_feature_sets[key] = np.arange(X_train.shape[1], dtype=int)
 
 	if not fitted_pipelines:
-		raise FileNotFoundError(f"在 {art_dir} 中未找到 model_*.joblib，无法重跑 SHAP")
+		raise FileNotFoundError(f"No valid models encountered under destination path {art_dir}")
 
-	print(f"[SHAP] 复用既有结果目录，仅重新执行 SHAP: {run_dir}")
+	print(f"[SHAP] Reusing existing run directory, only executing SHAP analysis: {run_dir}")
 	_run_shap(
 		outdir=run_dir,
 		fitted_pipelines=fitted_pipelines,
@@ -3180,9 +3161,9 @@ def delong_auc_comparison_table(
 	proba_by_model: dict[str, np.ndarray],
 	dataset_name: str = "Test",
 ) -> pd.DataFrame:
-	"""生成模型两两DeLong AUC比较表，格式与示例一致。
+	"""Generate pairwise DeLong AUC comparison table matching baseline layout.
 
-	列: New model-Baseline model, New model, Baseline model, Difference of AUC, 95% CI, Z statistic, P
+	Columns: New model-Baseline model, New model, Baseline model, Difference of AUC, 95% CI, Z statistic, P
 	"""
 	from scipy.stats import norm
 
@@ -3190,14 +3171,13 @@ def delong_auc_comparison_table(
 	n = len(model_keys)
 	y_true = np.asarray(y_true)
 
-	# 预先计算所有模型的 AUC
 	auc_by_model: dict[str, float] = {}
 	for key in model_keys:
 		p = np.asarray(proba_by_model[key])
 		auc_by_model[key] = float(roc_auc_score(y_true, p))
 
-	def _delong_details(p1: np.ndarray, p2: np.ndarray) -> tuple[float, float, float, float, float, float]:
-		"""返回 (auc1, auc2, diff, ci_lo, ci_hi, z, pval)"""
+	def _delong_details(p1: np.ndarray, p2: np.ndarray) -> tuple[float, float, float, float, float, float, float]:
+		"""Returns (auc1, auc2, diff, ci_lo, ci_hi, z, pval)"""
 		p1 = np.asarray(p1)
 		p2 = np.asarray(p2)
 		pos = y_true == 1
@@ -3237,7 +3217,6 @@ def delong_auc_comparison_table(
 			m1, m2 = model_keys[i], model_keys[j]
 			p1, p2 = proba_by_model[m1], proba_by_model[m2]
 			auc1, auc2, diff, ci_lo, ci_hi, z_stat, pval = _delong_details(p1, p2)
-			# 格式化 P 值
 			if pval < 0.0001:
 				p_str = "<0.0001"
 			else:
@@ -3265,35 +3244,32 @@ def save_delong_comparison_tables(
 	proba_test: dict[str, np.ndarray],
 	proba_external: dict[str, np.ndarray] | None,
 ) -> None:
-	"""保存训练集、测试集、外部验证集的DeLong AUC比较表（格式与示例一致）。"""
+	"""Save DeLong AUC comparison matrices across train, test and external verification cohorts securely."""
 	tables_dir = outdir / "tables"
 	_ensure_dir(tables_dir)
 
-	# 训练集
+	# Train Cohort
 	df_train = delong_auc_comparison_table(y_train, proba_train, "Training")
 	df_train.to_excel(tables_dir / "delong_auc_comparison_train.xlsx", index=False)
 
-	# 测试集
+	# Test Cohort
 	df_test = delong_auc_comparison_table(y_test, proba_test, "Test")
 	df_test.to_excel(tables_dir / "delong_auc_comparison_test.xlsx", index=False)
 
-	# 外部验证集
+	# External Verification Cohort
 	if y_external is not None and proba_external is not None and len(proba_external) > 0:
 		df_ext = delong_auc_comparison_table(y_external, proba_external, "External")
 		df_ext.to_excel(tables_dir / "delong_auc_comparison_external.xlsx", index=False)
 
 
-def compute_nri_idi(
+def compute_feature_reclassification_improvement(
 	y_true: np.ndarray,
 	p_new: np.ndarray,
 	p_baseline: np.ndarray,
 	n_boot: int = 1000,
 	random_state: int = 42,
 ) -> dict[str, Any]:
-	"""计算 NRI (Net Reclassification Improvement) 和 IDI (Integrated Discrimination Improvement)。
-
-	返回: dict 包含 NRI, NRI_CI, NRI_pval, IDI, IDI_CI, IDI_pval
-	"""
+	"""Calculate NRI (Net Reclassification Improvement) and IDI (Integrated Discrimination Improvement) measurements."""
 	from scipy.stats import norm
 
 	y_true = np.asarray(y_true).ravel()
@@ -3301,34 +3277,25 @@ def compute_nri_idi(
 	p_baseline = np.asarray(p_baseline).ravel()
 	n = len(y_true)
 
-	# 事件组 (y=1) 和非事件组 (y=0)
-	event_mask = y_true == 1
-	nonevent_mask = y_true == 0
-
 	def _calc_nri_idi(y: np.ndarray, pn: np.ndarray, pb: np.ndarray) -> tuple[float, float]:
-		"""计算单次 NRI 和 IDI"""
 		ev = y == 1
 		ne = y == 0
-		# NRI: 事件组中向上移动的比例 - 向下移动的比例 + 非事件组中向下移动的比例 - 向上移动的比例
-		# 使用连续 NRI (category-free NRI)
+		# Continuous NRI (category-free NRI estimation technique)
 		p_up_event = np.mean(pn[ev] > pb[ev]) if np.sum(ev) > 0 else 0
 		p_down_event = np.mean(pn[ev] < pb[ev]) if np.sum(ev) > 0 else 0
 		p_up_nonevent = np.mean(pn[ne] > pb[ne]) if np.sum(ne) > 0 else 0
 		p_down_nonevent = np.mean(pn[ne] < pb[ne]) if np.sum(ne) > 0 else 0
 		nri = (p_up_event - p_down_event) + (p_down_nonevent - p_up_nonevent)
 
-		# IDI: 新模型的判别斜率 - 基线模型的判别斜率
-		# 判别斜率 = 事件组的平均预测概率 - 非事件组的平均预测概率
+		# Integrated Discrimination Slope variances
 		is_new = (np.mean(pn[ev]) - np.mean(pn[ne])) if (np.sum(ev) > 0 and np.sum(ne) > 0) else 0
 		is_baseline = (np.mean(pb[ev]) - np.mean(pb[ne])) if (np.sum(ev) > 0 and np.sum(ne) > 0) else 0
 		idi = is_new - is_baseline
 
 		return float(nri), float(idi)
 
-	# 原始估计
 	nri_obs, idi_obs = _calc_nri_idi(y_true, p_new, p_baseline)
 
-	# Bootstrap 置信区间和 p 值
 	rng = np.random.RandomState(random_state)
 	nri_boots = []
 	idi_boots = []
@@ -3340,11 +3307,9 @@ def compute_nri_idi(
 	nri_boots = np.array(nri_boots)
 	idi_boots = np.array(idi_boots)
 
-	# 95% CI
 	nri_ci = (float(np.percentile(nri_boots, 2.5)), float(np.percentile(nri_boots, 97.5)))
 	idi_ci = (float(np.percentile(idi_boots, 2.5)), float(np.percentile(idi_boots, 97.5)))
 
-	# P 值 (基于 bootstrap 标准误的 Z 检验)
 	nri_se = float(np.std(nri_boots, ddof=1))
 	idi_se = float(np.std(idi_boots, ddof=1))
 	nri_z = nri_obs / nri_se if nri_se > 0 else 0
@@ -3369,9 +3334,9 @@ def nri_idi_comparison_table(
 	n_boot: int = 1000,
 	random_state: int = 42,
 ) -> pd.DataFrame:
-	"""生成模型两两 NRI 和 IDI 比较表，格式与示例一致。
+	"""Generate NRI and IDI reclassification summary matrices.
 
-	列: New model-Baseline model, NRI, P value, IDI, P value
+	Columns: New model-Baseline model, NRI, P value, IDI, P value
 	"""
 	model_keys = list(proba_by_model.keys())
 	n = len(model_keys)
@@ -3386,14 +3351,12 @@ def nri_idi_comparison_table(
 			p_new = np.asarray(proba_by_model[m_new])
 			p_baseline = np.asarray(proba_by_model[m_baseline])
 
-			result = compute_nri_idi(y_true, p_new, p_baseline, n_boot=n_boot, random_state=random_state)
+			result = compute_feature_reclassification_improvement(y_true, p_new, p_baseline, n_boot=n_boot, random_state=random_state)
 
-			# 格式化 NRI
 			nri_val = result["NRI"]
 			nri_lo, nri_hi = result["NRI_CI"]
 			nri_str = f"{nri_val:.4f}({nri_lo:.4f}~{nri_hi:.4f})"
 
-			# 格式化 NRI P 值
 			nri_pval = result["NRI_pval"]
 			if nri_pval < 0.0001:
 				nri_p_str = "<0.0001"
@@ -3404,12 +3367,10 @@ def nri_idi_comparison_table(
 			else:
 				nri_p_str = f"{nri_pval:.2f}"
 
-			# 格式化 IDI
 			idi_val = result["IDI"]
 			idi_lo, idi_hi = result["IDI_CI"]
 			idi_str = f"{idi_val:.4f}({idi_lo:.4f}~{idi_hi:.4f})"
 
-			# 格式化 IDI P 值
 			idi_pval = result["IDI_pval"]
 			if idi_pval < 0.0001:
 				idi_p_str = "<0.0001"
@@ -3425,7 +3386,7 @@ def nri_idi_comparison_table(
 				"NRI": nri_str,
 				"P value": nri_p_str,
 				"IDI": idi_str,
-				"P value ": idi_p_str,  # 注意：添加空格以区分两个 P value 列
+				"P value ": idi_p_str,  # Trailing whitespace used to differentiate separate metric flags cleanly
 			})
 
 	df = pd.DataFrame(rows)
@@ -3443,23 +3404,20 @@ def save_nri_idi_comparison_tables(
 	n_boot: int = 1000,
 	random_state: int = 42,
 ) -> None:
-	"""保存训练集、测试集、外部验证集的 NRI 和 IDI 比较表。"""
+	"""Save pairwise NRI and IDI structural comparison arrays safely."""
 	tables_dir = outdir / "tables"
 	_ensure_dir(tables_dir)
 
 	print("[INFO] Computing NRI & IDI comparison tables (this may take a while)...")
 
-	# 训练集
 	df_train = nri_idi_comparison_table(y_train, proba_train, "Training", n_boot=n_boot, random_state=random_state)
 	df_train.to_excel(tables_dir / "nri_idi_comparison_train.xlsx", index=False)
 	print(f"  -> Saved: {tables_dir / 'nri_idi_comparison_train.xlsx'}")
 
-	# 测试集
 	df_test = nri_idi_comparison_table(y_test, proba_test, "Test", n_boot=n_boot, random_state=random_state)
 	df_test.to_excel(tables_dir / "nri_idi_comparison_test.xlsx", index=False)
 	print(f"  -> Saved: {tables_dir / 'nri_idi_comparison_test.xlsx'}")
 
-	# 外部验证集
 	if y_external is not None and proba_external is not None and len(proba_external) > 0:
 		df_ext = nri_idi_comparison_table(y_external, proba_external, "External", n_boot=n_boot, random_state=random_state)
 		df_ext.to_excel(tables_dir / "nri_idi_comparison_external.xlsx", index=False)
@@ -3475,10 +3433,7 @@ def save_logloss_comparison_tables(
 	proba_test: dict[str, np.ndarray],
 	proba_external: dict[str, np.ndarray] | None,
 ) -> None:
-	"""保存训练集、测试集、外部验证集的 Log Loss 比较表。
-
-	输出格式：Model, Log_Loss_Train / Log_Loss_Test / Log_Loss_External
-	"""
+	"""Compute and save cross-cohort log loss tracking entities safely."""
 	tables_dir = outdir / "tables"
 	_ensure_dir(tables_dir)
 
@@ -3490,7 +3445,6 @@ def save_logloss_comparison_tables(
 	def _calc_logloss(y_true: np.ndarray, y_proba: np.ndarray) -> float:
 		return float(log_loss(y_true, np.vstack([1 - y_proba, y_proba]).T, labels=[0, 1]))
 
-	# 训练集 Log Loss 表
 	rows_train = []
 	for key in ordered_keys:
 		ll = _calc_logloss(y_train, proba_train[key])
@@ -3498,7 +3452,6 @@ def save_logloss_comparison_tables(
 	df_train = pd.DataFrame(rows_train)
 	df_train.to_excel(tables_dir / "logloss_comparison_train.xlsx", index=False)
 
-	# 测试集 Log Loss 表
 	rows_test = []
 	for key in ordered_keys:
 		ll = _calc_logloss(y_test, proba_test[key])
@@ -3506,7 +3459,6 @@ def save_logloss_comparison_tables(
 	df_test = pd.DataFrame(rows_test)
 	df_test.to_excel(tables_dir / "logloss_comparison_test.xlsx", index=False)
 
-	# 外部验证集 Log Loss 表
 	if y_external is not None and proba_external is not None and len(proba_external) > 0:
 		rows_ext = []
 		for key in ordered_keys:
@@ -3517,7 +3469,6 @@ def save_logloss_comparison_tables(
 			df_ext = pd.DataFrame(rows_ext)
 			df_ext.to_excel(tables_dir / "logloss_comparison_external.xlsx", index=False)
 
-	# 汇总表：训练集 + 测试集 + 外部验证集（如果有）
 	rows_summary = []
 	for key in ordered_keys:
 		row = {
@@ -3565,11 +3516,11 @@ def save_feature_importance_summary(
 	all_importances: dict[str, pd.DataFrame],
 	out_path: Path,
 ) -> None:
-	"""将各模型的 feature_importance 汇总为一个 Excel 表。
+	"""Consolidate the feature importance tables of each model into a unified Excel book structure.
 
-	输出格式：
-	- 每个模型一个 Sheet
-	- 额外增加一个 "Summary" Sheet，包含所有模型的重要性汇总（横向排列）
+	Output format:
+	- Separate sheets per individual tracking candidate model architecture entity
+	- Supplemental comprehensive tracking summary spreadsheet layer reporting normalized vectors side-by-side
 	"""
 	if not all_importances:
 		return
@@ -3579,31 +3530,28 @@ def save_feature_importance_summary(
 	present += [k for k in all_importances.keys() if k not in present]
 
 	with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
-		# 1. 每个模型单独一个 Sheet
+		# 1. Individual structural target layouts
 		for key in present:
 			df = all_importances[key].copy()
 			df.to_excel(writer, sheet_name=key, index=False)
 
-		# 2. 汇总 Sheet：以 feature 为行，各模型的 importance 为列
+		# 2. Consolidated summary layout section mapping
 		summary_dfs = []
 		for key in present:
 			df = all_importances[key][["feature", "feature_display", "importance"]].copy()
 			df = df.rename(columns={"importance": key})
 			summary_dfs.append(df)
 
-		# 合并所有模型的表，以 feature 为键
 		if summary_dfs:
 			merged = summary_dfs[0][["feature", "feature_display"]].copy()
 			for i, key in enumerate(present):
 				imp_col = summary_dfs[i][[key]].copy()
 				merged = pd.concat([merged, imp_col], axis=1)
 
-			# 计算平均重要性并排序
 			model_cols = [k for k in present if k in merged.columns]
 			merged["Mean_Importance"] = merged[model_cols].abs().mean(axis=1)
 			merged = merged.sort_values("Mean_Importance", ascending=False, ignore_index=True)
 
-			# 添加排名列
 			merged.insert(0, "Rank", range(1, len(merged) + 1))
 
 			merged.to_excel(writer, sheet_name="Summary", index=False)
@@ -3616,7 +3564,7 @@ def save_feature_importance_grid(
 	out_path: Path,
 	top_n: int = 20,
 ) -> None:
-	"""示意图：9个模型各自的特征重要性Top-N柱状图（3x3）。"""
+	"""Render multi-panel 3x3 layout charting variable coefficients safely across configurations."""
 
 	key_order = ["LR", "DT", "RF", "SVM", "KNN", "NB", "XGB", "SGBT", "NNET"]
 	present = [k for k in key_order if k in all_importances]
@@ -3630,11 +3578,9 @@ def save_feature_importance_grid(
 	for i, key in enumerate(present[:9]):
 		ax = axes[i]
 		df = all_importances[key].copy()
-		# 取 abs_importance 排序的 Top N
 		if "abs_importance" not in df.columns:
 			df["abs_importance"] = df["importance"].abs()
 		df = df.sort_values("abs_importance", ascending=False).head(top_n)
-		# 为了让柱子从左到右递减
 		df = df.iloc[::-1]
 		if "feature_display" in df.columns:
 			feat_disp = df["feature_display"].astype(str).tolist()
@@ -3657,13 +3603,7 @@ def save_feature_importance_grid(
 
 
 def save_feature_importance_heatmap(all_importances: dict[str, pd.DataFrame], out_path: Path, top_n: int = 25) -> None:
-	"""不同模型 Top 特征重要性 heatmap（默认输出）。
-
-	Notes
-	-----
-	- 行：特征；列：模型；值：abs_importance（默认按列归一化，便于不同模型对比）。
-	- 先取每个模型 Top-N，再按跨模型重要性总和挑出 Top-N 个特征用于展示。
-	"""
+	"""Generate normalized comparative feature weight heatmaps across algorithm architectures securely."""
 
 	if not all_importances:
 		print("[FIG] No feature-importance tables; skip heatmap.")
@@ -3697,15 +3637,12 @@ def save_feature_importance_heatmap(all_importances: dict[str, pd.DataFrame], ou
 		.reindex(columns=present, fill_value=0.0)
 	)
 
-	# 选出跨模型综合最重要的 Top-N 特征
 	pivot["_sum"] = pivot.sum(axis=1)
 	pivot = pivot.sort_values("_sum", ascending=False).drop(columns=["_sum"]).head(top_n)
 
-	# 仅用于展示：清理特征名前缀（避免 num_/cat_ 出现在图中）
 	pretty_index = _clean_display_feature_names([str(x) for x in pivot.index.tolist()])
 	pivot.index = pretty_index
 
-	# 归一化：每个模型列除以其最大值（避免某个模型整体尺度更大“压扁”颜色）
 	den = pivot.max(axis=0).replace(0.0, np.nan)
 	pivot_plot = (pivot / den).fillna(0.0)
 
@@ -3744,15 +3681,12 @@ def save_variable_heatmaps_by_model(
 	y_external: np.ndarray | None = None,
 	y_proba_external_by_model: dict[str, np.ndarray] | None = None,
 ) -> None:
-	"""每个模型单独输出一张"变量热图"，仿照示例图风格：
+	"""Generate high-fidelity comparative visual sample expression arrays independently per model configuration.
 
-	- 行：该模型特征（默认显示该模型全部入模特征；如指定 top_n 则取 Top-N）
-	- 列：样本（训练集 + 测试集 + 外部验证集拼接）
-	- 特征标签在右侧
-	- 额外三行注释：Predicted value / Outcome / Group
-	- 底部legend区：每个变量一个垂直colorbar，网格布局
-
-	说明：为避免不同变量量纲影响颜色，本函数对每个变量行做 min-max 归一化到 [0,1]。
+	- Rows: Selected model-specific attributes mapped properly
+	- Columns: Cohort observations concatenated explicitly
+	- Tracking context matrices included: Prediction Risk / Ground Truth Outcome / Set Membership Group
+	- Color scale metadata reported cleanly via tabular layout panels
 	"""
 	if not importance_tables:
 		print("[FIG] No importance tables; skip variable heatmaps.")
@@ -3760,7 +3694,6 @@ def save_variable_heatmaps_by_model(
 
 	_ensure_dir(out_dir)
 
-	# 判断是否有外部验证集
 	has_external = (
 		X_external is not None
 		and y_external is not None
@@ -3768,7 +3701,6 @@ def save_variable_heatmaps_by_model(
 		and len(y_external) > 0
 	)
 
-	# 拼接样本
 	if has_external:
 		if sp.issparse(X_train) or sp.issparse(X_test) or sp.issparse(X_external):
 			X_all = sp.vstack([X_train, X_test, X_external], format="csr")
@@ -3809,7 +3741,6 @@ def save_variable_heatmaps_by_model(
 		if p_tr is None or p_te is None:
 			continue
 		
-		# 拼接预测概率
 		if has_external and y_proba_external_by_model is not None:
 			p_ex = y_proba_external_by_model.get(key)
 			if p_ex is not None:
@@ -3843,15 +3774,13 @@ def save_variable_heatmaps_by_model(
 		vals = X_sub.toarray() if sp.issparse(X_sub) else np.asarray(X_sub)
 		vals = vals.astype(float, copy=False).T  # (n_feat, n_samples)
 
-		# 每行 min-max 归一化到 [0,1]
 		row_min = np.nanmin(vals, axis=1, keepdims=True)
 		row_max = np.nanmax(vals, axis=1, keepdims=True)
 		den = np.where((row_max - row_min) == 0, 1.0, (row_max - row_min))
 		vals01 = (vals - row_min) / den
 		vals01 = np.clip(vals01, 0.0, 1.0)
 
-		# 样本排序：Outcome → Group → 预测概率(降序)
-		# Group编码：Training=0, Test=1, External=2
+		# Sort observation entities: Outcome -> Group -> Risk Probability desc
 		group_code_all = np.zeros(len(group_all), dtype=int)
 		group_code_all[group_all == "Test set"] = 1
 		group_code_all[group_all == "External set"] = 2
@@ -3878,42 +3807,37 @@ def save_variable_heatmaps_by_model(
 				return f"{v:.1f}"
 			return f"{v:.2f}"
 
-		# 示例图配色方案 - 高对比度、差异明显的颜色（参考示例图）
-		# 按照示例图风格：棕色系、黄色系、紫色系、粉色系、绿色系、蓝色系等交替
-		# 确保相邻颜色对比明显，避免紫色系连续出现
 		example_colors = [
-			"#C68642",  # 深棕橙
-			"#F5C342",  # 金黄
-			"#2196F3",  # 亮蓝（原为深紫，改为蓝色增加对比）
-			"#E91E63",  # 玫红
-			"#795548",  # 棕色
-			"#4CAF50",  # 绿色
-			"#FF9800",  # 橙色（原为靛紫）
-			"#9C27B0",  # 紫色
-			"#00BCD4",  # 青色（原为紫色，增加对比）
-			"#8BC34A",  # 浅绿（原为蓝色）
-			"#FF5722",  # 深橙
-			"#3F51B5",  # 靛蓝
-			"#CDDC39",  # 黄绿
-			"#673AB7",  # 靛紫
-			"#009688",  # 深青
-			"#E040FB",  # 亮紫
-			"#FF6F00",  # 琥珀
-			"#1E88E5",  # 亮蓝
-			"#43A047",  # 深绿
-			"#F06292",  # 粉色
-			"#7E57C2",  # 中紫
-			"#26A69A",  # 深青
-			"#FFA000",  # 深黄
-			"#5E35B1",  # 深靛
+			"#C68642",  # Dark brown orange
+			"#F5C342",  # Gold yellow
+			"#2196F3",  # Light blue
+			"#E91E63",  # Rose pink
+			"#795548",  # Brown
+			"#4CAF50",  # Green
+			"#FF9800",  # Orange
+			"#9C27B0",  # Purple
+			"#00BCD4",  # Cyan
+			"#8BC34A",  # Light green
+			"#FF5722",  # Deep orange
+			"#3F51B5",  # Indigo blue
+			"#CDDC39",  # Yellow green
+			"#673AB7",  # Indigo purple
+			"#009688",  # Deep cyan
+			"#E040FB",  # Bright purple
+			"#FF6F00",  # Amber
+			"#1E88E5",  # Bright blue
+			"#43A047",  # Deep green
+			"#F06292",  # Pink
+			"#7E57C2",  # Medium purple
+			"#26A69A",  # Muted cyan
+			"#FFA000",  # Muted yellow
+			"#5E35B1",  # Muted indigo
 		]
-		# 扩展颜色列表以覆盖所有特征
 		base_colors = []
 		for i in range(n_feat):
 			base_colors.append(matplotlib.colors.to_rgba(example_colors[i % len(example_colors)]))
 
-		# 分类变量0值用浅灰色（而非白色），与示例图一致
-		light_rgba = matplotlib.colors.to_rgba("#F5F5DC")  # 浅米灰色
+		light_rgba = matplotlib.colors.to_rgba("#F5F5DC")  # Light beige base segment mapping
 		rgba = np.zeros((n_feat, n_samp, 4), dtype=float)
 		row_cm: list[Any] = []
 		row_ticks: list[tuple[list[float], list[str]]] = []
@@ -3930,7 +3854,6 @@ def save_variable_heatmaps_by_model(
 			mx = float(np.nanmax(v_raw_finite)) if v_raw_finite.size else 1.0
 			row_min_max.append((mn, mx))
 
-			# 判断离散/连续
 			is_binary01 = uniq.size <= 2 and uniq.size > 0 and np.all(np.isin(uniq, [0.0, 1.0]))
 			is_small_discrete = (not is_binary01) and (uniq.size > 0) and (uniq.size <= 3)
 
@@ -3966,62 +3889,51 @@ def save_variable_heatmaps_by_model(
 				row_cm.append(cm)
 				row_ticks.append(([0, 1], [_fmt_tick(mn), _fmt_tick(mx)]))
 
-		# ============ 布局设计（仿照示例图）============
-		# legend区: 每个变量一个垂直colorbar，固定每行6个
-		legend_ncol = 6  # 固定每行6个图注
-		n_legend_items = n_feat + 3  # 特征 + predicted value + outcome + group
+		legend_ncol = 6  
+		n_legend_items = n_feat + 3  
 		legend_nrows = int(math.ceil(n_legend_items / legend_ncol))
 
-		# 图尺寸 - 调整legend区高度
 		fig_w = max(10.0, n_samp / 100.0)
 		heatmap_h = 0.28 * n_feat
-		annot_h = 0.3 * 3  # 3个注释行（缩小高度）
-		legend_h = 1.8 * legend_nrows  # 每行高度（更紧凑）
-		fig_h = heatmap_h + annot_h + legend_h + 4.0  # 底部留白
+		annot_h = 0.3 * 3  
+		legend_h = 1.8 * legend_nrows  
+		fig_h = heatmap_h + annot_h + legend_h + 4.0  
 
 		fig = plt.figure(figsize=(fig_w, fig_h), facecolor="white")
-		# 总布局：热图 | 3个注释行 | 留白间隔 | legend区
-		# 注释行高度与变量行一致（都是1.0），hspace=0 使行之间紧密排列
 		gs_main = fig.add_gridspec(
 			6, 1,
-			height_ratios=[n_feat, 1.0, 1.0, 1.0, 1.2, legend_nrows * 3.5 + 2.0],  # 调整间隔行和legend区高度
+			height_ratios=[n_feat, 1.0, 1.0, 1.0, 1.2, legend_nrows * 3.5 + 2.0],  
 			hspace=0.0,
 			top=0.96, bottom=0.04, left=0.02, right=0.88
 		)
 
-		# ============ 主热图 ============
+		# ============ Primary Visual Matrix ============
 		ax0 = fig.add_subplot(gs_main[0, 0])
 		ax0.imshow(rgba, aspect="auto", interpolation="nearest")
 		ax0.set_yticks(np.arange(n_feat))
-		ax0.set_yticklabels([])  # 左边不显示标签
+		ax0.set_yticklabels([])  
 		ax0.set_xticks([])
 		ax0.tick_params(left=False, bottom=False)
 		for spine in ax0.spines.values():
 			spine.set_visible(False)
-		# 添加行间细白色分隔线
 		for i in range(1, n_feat):
 			ax0.axhline(y=i - 0.5, color="white", linewidth=0.5)
 
-		# 右侧标签 - 字号调大
 		ax0_right = ax0.secondary_yaxis("right")
 		ax0_right.set_yticks(np.arange(n_feat))
-		ax0_right.set_yticklabels(feat_labels, fontsize=11)  # 字号从9调大到11
+		ax0_right.set_yticklabels(feat_labels, fontsize=11)  
 		ax0_right.tick_params(right=False)
-		# 去掉右侧secondary_yaxis的spine（避免黑线）
 		for spine in ax0_right.spines.values():
 			spine.set_visible(False)
 
-		# ============ RF predicted value（条状显示，非渐变）============
+		# ============ Predicted value ribbon ============
 		ax1 = fig.add_subplot(gs_main[1, 0], sharex=ax0)
-		# 使用与示例图一致的棕橙色渐变colormap
 		pred_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("pred", ["#FFF5E6", "#D2691E"])
-		# 将预测概率离散化显示为条状（按样本顺序直接显示，不做插值）
 		ax1.imshow(p_sorted.reshape(1, -1), aspect="auto", interpolation="none", cmap=pred_cmap, vmin=0.0, vmax=1.0)
 		ax1.set_yticks([])
 		ax1.set_xticks([])
 		for spine in ax1.spines.values():
 			spine.set_visible(False)
-		# 顶部添加细白色分隔线
 		ax1.axhline(y=-0.5, color="white", linewidth=0.5)
 		ax1_right = ax1.secondary_yaxis("right")
 		ax1_right.set_yticks([0])
@@ -4030,16 +3942,15 @@ def save_variable_heatmaps_by_model(
 		for spine in ax1_right.spines.values():
 			spine.set_visible(False)
 
-		# ============ Outcome ============
+		# ============ Outcome Ribbon ============
 		ax2 = fig.add_subplot(gs_main[2, 0], sharex=ax0)
 		outcome_code = outcome_code_sorted
-		outcome_cmap = matplotlib.colors.ListedColormap(["#8BC34A", "#FF9800"])  # M0绿 M1橙
+		outcome_cmap = matplotlib.colors.ListedColormap(["#8BC34A", "#FF9800"])  # M0=Green M1=Orange
 		ax2.imshow(outcome_code.reshape(1, -1), aspect="auto", interpolation="none", cmap=outcome_cmap, vmin=0, vmax=1)
 		ax2.set_yticks([])
 		ax2.set_xticks([])
 		for spine in ax2.spines.values():
 			spine.set_visible(False)
-		# 顶部添加细白色分隔线
 		ax2.axhline(y=-0.5, color="white", linewidth=0.5)
 		ax2_right = ax2.secondary_yaxis("right")
 		ax2_right.set_yticks([0])
@@ -4048,10 +3959,9 @@ def save_variable_heatmaps_by_model(
 		for spine in ax2_right.spines.values():
 			spine.set_visible(False)
 
-		# ============ Group（支持3个组别：Training/Test/External）============
+		# ============ Group Ribbon ============
 		ax3 = fig.add_subplot(gs_main[3, 0], sharex=ax0)
 		group_code = group_code_sorted
-		# 三色：Training紫、Test橙、External蓝绿
 		group_cmap = matplotlib.colors.ListedColormap(["#9C27B0", "#FF9800", "#00BCD4"])
 		n_groups = 3 if has_external else 2
 		ax3.imshow(group_code.reshape(1, -1), aspect="auto", interpolation="none", cmap=group_cmap, vmin=0, vmax=n_groups - 1)
@@ -4059,7 +3969,6 @@ def save_variable_heatmaps_by_model(
 		ax3.set_xticks([])
 		for spine in ax3.spines.values():
 			spine.set_visible(False)
-		# 顶部添加细白色分隔线
 		ax3.axhline(y=-0.5, color="white", linewidth=0.5)
 		ax3_right = ax3.secondary_yaxis("right")
 		ax3_right.set_yticks([0])
@@ -4068,15 +3977,12 @@ def save_variable_heatmaps_by_model(
 		for spine in ax3_right.spines.values():
 			spine.set_visible(False)
 
-		# ============ 底部Legend区（垂直colorbar网格）============
-		# 添加一个空白间隔行（gs_main[4, 0]），然后是legend区
-		gs_legend = gs_main[5, 0].subgridspec(legend_nrows, legend_ncol, wspace=0.18, hspace=0.40)  # 缩小间距
+		# ============ Color Scales Legend Matrices ============
+		gs_legend = gs_main[5, 0].subgridspec(legend_nrows, legend_ncol, wspace=0.18, hspace=0.40)  
 
-		# 构建legend项列表：特征 + predicted value + outcome + group
 		legend_items = []
 		for i in range(n_feat):
 			ticks = row_ticks[i]
-			# 判断类型
 			if ticks[1] == ["0", "1"]:
 				ltype = "binary"
 			elif len(ticks[0]) <= 2:
@@ -4092,7 +3998,6 @@ def save_variable_heatmaps_by_model(
 				"vmax": row_min_max[i][1],
 				"base_color": base_colors[i],
 			})
-		# RF predicted value - 改为连续变量显示（带刻度）
 		legend_items.append({
 			"type": "continuous",
 			"label": f"{key} predicted value",
@@ -4101,14 +4006,12 @@ def save_variable_heatmaps_by_model(
 			"vmin": 0, "vmax": 1,
 			"base_color": matplotlib.colors.to_rgba("#D2691E"),
 		})
-		# Outcome
 		legend_items.append({
 			"type": "categorical",
 			"label": "Outcome",
 			"colors": ["#8BC34A", "#FF9800"],
 			"labels": ["M0", "M1"],
 		})
-		# Group（根据是否有外部验证集动态调整）
 		if has_external:
 			legend_items.append({
 				"type": "categorical",
@@ -4131,43 +4034,36 @@ def save_variable_heatmaps_by_model(
 				break
 			ax_leg = fig.add_subplot(gs_legend[row, col])
 
-			# 统一所有图注的ylim范围，确保同一行的标题在同一水平高度
 			unified_ylim = (-0.1, 1.15)
 
 			if item["type"] == "categorical":
-				# 离散类别：竖着排列色块（仿照示例图）
 				n_cats = len(item["colors"])
-				box_h = 0.22  # 每个色块的高度（稍微缩小）
-				box_w = 0.22  # 色块宽度（更窄）
-				total_h = n_cats * box_h
+				box_h = 0.22  
+				box_w = 0.22  
 				for j, (color, label) in enumerate(zip(item["colors"], item["labels"])):
-					y_pos = (n_cats - 1 - j) * box_h  # 从上到下排列
+					y_pos = (n_cats - 1 - j) * box_h  
 					rect = plt.Rectangle((0, y_pos), box_w, box_h * 0.9, facecolor=color, edgecolor="none")
 					ax_leg.add_patch(rect)
 					ax_leg.text(box_w + 0.06, y_pos + box_h * 0.45, label, ha="left", va="center", fontsize=9)
 				ax_leg.set_xlim(-0.05, 1.3)
 				ax_leg.set_ylim(unified_ylim)
 			elif item["type"] == "binary":
-				# 二值变量：竖着排列两个色块
 				cm = item["cmap"]
 				colors = [cm(0.0), cm(1.0)]
 				labels = item["ticks"][1]
 				box_h = 0.22
 				box_w = 0.22
 				for j, (color, label) in enumerate(zip(colors, labels)):
-					y_pos = (1 - j) * box_h  # 从上到下：0在上，1在下
+					y_pos = (1 - j) * box_h  
 					rect = plt.Rectangle((0, y_pos), box_w, box_h * 0.9, facecolor=color, edgecolor="none")
 					ax_leg.add_patch(rect)
 					ax_leg.text(box_w + 0.06, y_pos + box_h * 0.45, label, ha="left", va="center", fontsize=9)
 				ax_leg.set_xlim(-0.05, 1.0)
 				ax_leg.set_ylim(unified_ylim)
 			else:
-				# 连续变量：垂直colorbar，带刻度线（仿照示例图，更窄）
 				gradient = np.linspace(0, 1, 256).reshape(-1, 1)
 				ax_leg.imshow(gradient, aspect="auto", cmap=item["cmap"], origin="lower", extent=[0, 0.22, 0, 1])
-				# 在colorbar右侧绘制刻度线和标签
 				vmin, vmax = item["vmin"], item["vmax"]
-				# 生成3-5个刻度
 				if vmax - vmin > 0:
 					n_ticks = 4
 					tick_vals = np.linspace(vmin, vmax, n_ticks)
@@ -4175,7 +4071,6 @@ def save_variable_heatmaps_by_model(
 				else:
 					tick_vals = [vmin]
 					tick_positions = [0.5]
-				# 绘制刻度线和标签
 				for tv, tp in zip(tick_vals, tick_positions):
 					ax_leg.plot([0.24, 0.28], [tp, tp], color="0.3", linewidth=0.8)
 					ax_leg.text(0.32, tp, _fmt_tick(tv), ha="left", va="center", fontsize=9)
@@ -4186,12 +4081,10 @@ def save_variable_heatmaps_by_model(
 			ax_leg.set_yticks([])
 			for spine in ax_leg.spines.values():
 				spine.set_visible(False)
-			# 标题（变量名）左对齐，用与colorbar相同的颜色
 			if item["type"] == "categorical":
 				title_color = item["colors"][0]
 			else:
 				title_color = matplotlib.colors.to_hex(item["base_color"])
-			# 使用统一的ylim顶部位置放置标题，确保同一行水平对齐
 			ax_leg.text(0, unified_ylim[1] + 0.05, item["label"], fontsize=11, fontweight="bold", 
 			            color=title_color, ha="left", va="bottom")
 
@@ -4205,118 +4098,112 @@ def save_variable_heatmaps_by_model(
 def main() -> int:
 	examples = (
 		"Examples:\n"
-		"  # 推荐：ElasticNet 选特征（默认不启用稳定性选择，但把参数写死便于复现）\n"
+		"  # Recommended: ElasticNet feature selection (no stability selection by default, parameters fixed for reproducibility)\n"
 		"  python 12-RFE+model+SHAP-Lasso.PY --fs_method elasticnet --fs_stability_runs 200 --fs_stability_fraction 0.8 --fs_stability_threshold 0.6\n\n"
-		"  # 需要更稳健/更可复现时：开启稳定性选择（只需额外加 --fs_stability）\n"
+		"  # Turn on stability selection for higher robustness/reproducibility: add --fs_stability explicitly\n"
 		"  python 12-RFE+model+SHAP-Lasso.PY --fs_method elasticnet --fs_stability --fs_stability_runs 200 --fs_stability_fraction 0.8 --fs_stability_threshold 0.6\n\n"
-		"  # 显式关闭稳定性选择（等价于默认行为）：\n"
+		"  # Explicitly turn off stability selection (equivalent to default behavior):\n"
 		"  python 12-RFE+model+SHAP-Lasso.PY --fs_method elasticnet --no_fs_stability --fs_stability_runs 200 --fs_stability_fraction 0.8 --fs_stability_threshold 0.6\n"
 	)
 	parser = argparse.ArgumentParser(
-		description="L1/ElasticNet Logistic 选特征 + 9模型构建 + 性能评估（Metastasis）",
+		description="L1/ElasticNet Logistic feature selection + 9 Models construction + Performance assessment (Metastasis)",
 		epilog=examples,
 		formatter_class=argparse.RawTextHelpFormatter,
 	)
-	parser.add_argument("--input", default=str(Path("mice") / "combined_imputed.xlsx"), help="输入Excel文件")
+	parser.add_argument("--input", default=str(Path("mice") / "combined_imputed.xlsx"), help="Input Excel workbook location")
 	parser.add_argument(
 		"--rerun_shap_from",
 		default=None,
-		help="给定既有 run 目录，仅复用 artifacts 与 split 数据重新执行一次 SHAP，不重新建模。",
+		help="Given a previously processed run directory path, rerun SHAP pipelines extracting archived split allocations directly.",
 	)
 	parser.add_argument(
 		"--external_input",
 		default=str(Path("mice") / "combined_imputed-external.xlsx"),
-		help="外部验证集Excel文件（可不存在；不存在则自动跳过外部验证）",
+		help="External verification workbook file (automatically skipped if absent)",
 	)
-	parser.add_argument("--target", default="Metastasis", help="因变量列名（0/1）")
-	parser.add_argument("--outdir", default=str(Path("ml_results") / f"run_{_now_stamp()}"), help="输出目录")
+	parser.add_argument("--target", default="Metastasis", help="Outcome classification column name (0/1 values)")
+	parser.add_argument("--outdir", default=str(Path("ml_results") / f"run_{_now_stamp()}"), help="Destination results directory context")
 	parser.add_argument("--random_state", type=int, default=42)
 	parser.add_argument("--test_size", type=float, default=0.3)
 	parser.add_argument("--cv_folds", type=int, default=10)
 	parser.add_argument("--cv_repeats", type=int, default=10)
-	# 旧RFE参数保留（兼容历史命令行），但本脚本默认改用 L1/ElasticNet Logistic 选特征
-	parser.add_argument("--rfe_step", type=float, default=0.1, help="(兼容旧版) 不再使用")
-	parser.add_argument("--rfe_curve_points", type=int, default=30, help="(兼容旧版) 不再使用")
-	parser.add_argument("--max_dense_features", type=int, default=40, help="dense 模型允许的最大特征数（也用作 L1/ElasticNet 选特征上限）")
+	parser.add_argument("--rfe_step", type=float, default=0.1, help="(Legacy backward compatibility flag) deprecated")
+	parser.add_argument("--rfe_curve_points", type=int, default=30, help="(Legacy backward compatibility flag) deprecated")
+	parser.add_argument("--max_dense_features", type=int, default=40, help="Maximum feature dimension boundaries enforced on dense inputs")
 	parser.add_argument("--bootstrap", type=int, default=500)
 	parser.add_argument(
 		"--calibrate_proba",
 		dest="calibrate_proba",
 		action="store_true",
-		help="对每个模型的预测概率做后验校准（默认开启；可明显改善校准曲线的波动）。",
+		help="Execute post-hoc verification calibrator configurations over raw risk probability vectors (turned on by default).",
 	)
 	parser.add_argument(
 		"--no_calibrate_proba",
 		dest="calibrate_proba",
 		action="store_false",
-		help="关闭概率校准（保留原始 predict_proba 输出）。",
+		help="Bypass probability calibrator parameters, retrieving raw probability estimations directly.",
 	)
 	parser.set_defaults(calibrate_proba=True)
 	parser.add_argument(
 		"--calibration_method",
 		choices=["sigmoid", "isotonic", "none"],
 		default="sigmoid",
-		help="后验校准方法：sigmoid(更稳健，推荐小样本) / isotonic(更灵活) / none(关闭)。",
+		help="Calibrator algorithmic mechanism selection: sigmoid (recommended for small samples) / isotonic / none.",
 	)
 	parser.add_argument(
 		"--min_features",
 		type=int,
 		default=10,
-		help="特征选择后的最少特征数量（用于 L1/ElasticNet Logistic 或稳定性选择）。",
+		help="Minimum constraint of features retained during structural feature selection workflows.",
 	)
 	parser.add_argument(
 		"--fs_method",
 		choices=["elasticnet", "l1"],
 		default="elasticnet",
-		help="特征选择方法：elasticnet（推荐）或 l1（≈lasso）。",
+		help="Feature selection algorithm: elasticnet (highly recommended) or l1 penalty lasso.",
 	)
 	parser.add_argument(
 		"--fs_C_grid",
 		default="0.005,0.01,0.02,0.05,0.1,0.2,0.5,1",
-		help="Logistic 正则强度网格（C 越小正则越强），逗号分隔。",
+		help="Regularization coefficient sweep values for logistic selection models, comma separated (smaller implies higher penalty).",
 	)
-	parser.add_argument("--fs_cv_folds", type=int, default=5, help="特征选择阶段的CV折数")
+	parser.add_argument("--fs_cv_folds", type=int, default=5, help="Fold partitions dedicated to grid search cross-validation selection iterations")
 	parser.add_argument(
 		"--fs_l1_ratio_grid",
 		default="0.5,0.8,0.9,0.95",
-		help="ElasticNet 的 l1_ratio 网格（仅对 elasticnet 生效），逗号分隔。",
+		help="Mixing threshold parameters for ElasticNet setups, comma separated.",
 	)
 	parser.add_argument(
 		"--fs_coef_tol",
 		type=float,
 		default=1e-6,
-		help="判定系数为0的阈值（越大越稀疏）。",
+		help="Threshold parameter under which sparse coefficients evaluate strictly to true zero values.",
 	)
-	# 默认启用稳定性选择：重复分层子采样，统计入选频率（更稳健/更可复现）
 	parser.add_argument(
 		"--fs_stability",
 		dest="fs_stability",
 		action="store_true",
-		help="开启稳定性选择：重复分层子采样，保留稳定入选的特征。",
+		help="Activate repeated bootstrap/shuffle sub-sampling filtering routines (highly recommended).",
 	)
 	parser.add_argument(
 		"--no_fs_stability",
 		dest="fs_stability",
 		action="store_false",
-		help="关闭稳定性选择（更快，但可复现性/稳定性可能下降）。",
+		help="Deactivate stability iteration frameworks.",
 	)
 	parser.set_defaults(fs_stability=True)
-	parser.add_argument("--fs_stability_runs", type=int, default=200, help="稳定性选择重复次数")
-	parser.add_argument("--fs_stability_fraction", type=float, default=0.8, help="每次子采样使用训练集比例")
-	parser.add_argument("--fs_stability_threshold", type=float, default=0.6, help="入选频率阈值（0~1）")
+	parser.add_argument("--fs_stability_runs", type=int, default=200, help="Total execution passes configured for stability search loops")
+	parser.add_argument("--fs_stability_fraction", type=float, default=0.8, help="Sample ratio extracted per independent stability analysis loop pass")
+	parser.add_argument("--fs_stability_threshold", type=float, default=0.6, help="Frequency inclusion threshold criterion (bounded between 0 and 1)")
 	parser.add_argument(
 		"--n_jobs",
 		type=int,
 		default=1,
-		help=(
-			"并行进程数（GridSearchCV）。Windows下若用户名/路径含中文，joblib并行可能报UnicodeEncodeError；"
-			"可保持默认1最稳妥。"
-		),
+		help="Concurrent workers bound configuration. Keeping it to 1 is optimal under Windows configurations.",
 	)
-	# 默认自动运行SHAP；如需关闭可用 --no_shap
-	parser.add_argument("--no_shap", action="store_true", help="关闭SHAP可解释性分析（默认开启，会增加运行时间）")
-	parser.add_argument("--shap_background", type=int, default=100, help="SHAP background样本数")
-	parser.add_argument("--shap_samples", type=int, default=200, help="SHAP解释的样本数（从测试集抽样）")
+	parser.add_argument("--no_shap", action="store_true", help="Deactivate local/global SHAP contextual attribution pipelines entirely")
+	parser.add_argument("--shap_background", type=int, default=100, help="Baseline references size reserved for SHAP value computation maps")
+	parser.add_argument("--shap_samples", type=int, default=200, help="Total observations isolated from testing pools for SHAP interpretations")
 	args = parser.parse_args()
 
 	if args.rerun_shap_from:
@@ -4333,8 +4220,6 @@ def main() -> int:
 	_ensure_dir(outdir / "fig")
 	_ensure_dir(outdir / "tables")
 
-	# Windows + joblib(loky) 在中文路径下可能触发 resource_tracker 的 ascii 编码错误。
-	# 强制使用一个纯英文的临时目录来放 memmap 文件。
 	joblib_temp = Path(os.environ.get("JOBLIB_TEMP_FOLDER", ""))
 	if not str(joblib_temp):
 		joblib_temp = Path("C:/joblib_temp")
@@ -4343,43 +4228,36 @@ def main() -> int:
 		os.environ.setdefault("JOBLIB_TEMP_FOLDER", str(joblib_temp))
 		os.environ.setdefault("LOKY_TEMP_FOLDER", str(joblib_temp))
 	except Exception:
-		# 如果无法创建（权限等），就降级：让 GridSearchCV 单进程运行
 		args.n_jobs = 1
 
 	input_path = Path(args.input)
 	if not input_path.exists():
-		raise FileNotFoundError(f"找不到输入文件: {input_path}")
+		raise FileNotFoundError(f"Missing master data source input path error: {input_path}")
 
 	external_path = Path(args.external_input)
 	has_external = bool(external_path.exists())
 
 	df = pd.read_excel(input_path)
 	if args.target not in df.columns:
-		raise ValueError(f"找不到因变量列: {args.target}")
+		raise ValueError(f"Missing essential categorical target key: {args.target}")
 
 	y = df[args.target].astype(int).to_numpy()
-	# 排除人口学特征（Sex）和因变量列
 	cols_to_drop = [args.target] + [c for c in DEMOGRAPHIC_COLUMNS_EXCLUDE if c in df.columns]
 	X_df = df.drop(columns=cols_to_drop)
-	# 关键：建模前对分类列做“类别值规范化”，避免 0/0.0/空格0 导致重复水平
 	X_df = normalize_categorical_columns(X_df, CATEGORICAL_COLUMNS_DEFAULT)
 	pre, numeric_cols, cat_cols = build_preprocessor(X_df, CATEGORICAL_COLUMNS_DEFAULT)
 
-	# 7:3 分层抽样
 	splitter = StratifiedShuffleSplit(n_splits=1, test_size=args.test_size, random_state=args.random_state)
 	train_idx, test_idx = next(splitter.split(X_df, y))
 	X_train_df = X_df.iloc[train_idx].copy()
 	X_test_df = X_df.iloc[test_idx].copy()
-	# 再做一次保险规范化（防止上游 X_df 被外部改写/或仅部分列存在）
 	X_train_df = normalize_categorical_columns(X_train_df, cat_cols)
 	X_test_df = normalize_categorical_columns(X_test_df, cat_cols)
 	y_train = y[train_idx]
 	y_test = y[test_idx]
 
-	# 输出训练集/测试集 Excel（保留原始列，包含因变量列）
 	df_train = df.iloc[train_idx].copy()
 	df_test = df.iloc[test_idx].copy()
-	# 训练/测试导出与统计分析也使用同口径的类别值（避免表里出现 0 与 0.0 分裂）
 	for c in cat_cols:
 		if c in df_train.columns:
 			df_train[c] = normalize_categorical_series(df_train[c])
@@ -4390,8 +4268,6 @@ def main() -> int:
 	df_train.to_excel(train_xlsx, index=False)
 	df_test.to_excel(test_xlsx, index=False)
 
-	# 对训练集/测试集分别做 8-analyse_all.py 同款统计分析（输出表格）
-	# 若因变量列不是0/1二分类，将自动跳过（不影响后续建模）。
 	try:
 		group_col = str(args.target)
 		if group_col in df_train.columns and group_col in df_test.columns:
@@ -4431,9 +4307,9 @@ def main() -> int:
 				check=True,
 			)
 		else:
-			print(f"[WARN] 跳过统计分析：列 '{group_col}' 不存在或不是0/1二分类。")
+			print(f"[WARN] Skipping automated table statistics: target variable '{group_col}' missing or not strictly binary 0/1.")
 	except Exception as e:
-		print(f"[WARN] 统计分析调用失败（不影响建模流程）：{e}")
+		print(f"[WARN] Baseline tabular descriptive statistics script execution bypassed safely: {e}")
 
 	pre.fit(X_train_df)
 	X_train = _safe_float32_matrix(pre.transform(X_train_df))
@@ -4443,32 +4319,28 @@ def main() -> int:
 	if has_external:
 		ext_df = pd.read_excel(external_path)
 		if args.target not in ext_df.columns:
-			print(f"[WARN] 外部验证集缺少因变量列 '{args.target}'，跳过外部验证：{external_path}")
+			print(f"[WARN] External validation source dropped due to missing label definition: '{args.target}' under filename: {external_path}")
 			has_external = False
 		else:
 			y_external = ext_df[args.target].astype(int).to_numpy()
-			# 排除人口学特征（Sex）和因变量列
 			ext_cols_to_drop = [args.target] + [c for c in DEMOGRAPHIC_COLUMNS_EXCLUDE if c in ext_df.columns]
 			X_ext_df = ext_df.drop(columns=ext_cols_to_drop)
-			# 对齐列：缺失列补 NaN（让预处理器能正常 transform）
 			for col in X_train_df.columns:
 				if col not in X_ext_df.columns:
 					X_ext_df[col] = np.nan
 			X_ext_df = X_ext_df.copy()
-			# 外部验证同样做类别值规范化，保证与训练集 one-hot 类别一致
 			X_ext_df = normalize_categorical_columns(X_ext_df, cat_cols)
 			X_external = _safe_float32_matrix(pre.transform(X_ext_df))
-			# 输出外部验证集 Excel（保留原始列，包含因变量列）
 			ext_xlsx = outdir / "tables" / "split_external.xlsx"
 			ext_df.to_excel(ext_xlsx, index=False)
 	else:
-		print(f"[WARN] 未找到外部验证集文件，跳过外部验证：{external_path}")
+		print(f"[WARN] External target verification source data absent, bypassing track cleanly: {external_path}")
 	feature_names = get_feature_names(pre)
 
 	cv = RepeatedStratifiedKFold(n_splits=args.cv_folds, n_repeats=args.cv_repeats, random_state=args.random_state)
 	specs = build_model_specs(args.random_state)
 	if not _HAS_XGBOOST:
-		print("注意：未安装 xgboost，将跳过 XGB 模型。建议运行：pip install xgboost")
+		print("Notice: xgboost binary dependency packages are missing from the environment. XGB models will be skipped.")
 
 	run_meta = {
 		"input": str(input_path),
@@ -4505,7 +4377,7 @@ def main() -> int:
 	}
 	(outdir / "run_meta.json").write_text(json.dumps(run_meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
-	# 一、特征选择：Elastic Net / L1 Logistic（可选稳定性选择）
+	# Phase I: Feature Selection
 	print(f"[FS] Logistic ({args.fs_method}) ...")
 	C_grid = _parse_float_list(args.fs_C_grid)
 	l1_ratio_grid = _parse_float_list(args.fs_l1_ratio_grid)
@@ -4534,12 +4406,10 @@ def main() -> int:
 		outdir_tables=outdir / "tables",
 		outdir_fig=outdir / "fig",
 	)
-	print(f"[FS] Selected features: {int(selected_idx.size)}")
+	print(f"[FS] Selected features count: {int(selected_idx.size)}")
 
-	# 将同一组特征用于所有模型，保证可比性
 	best_feature_sets: dict[str, np.ndarray] = {s.key: selected_idx for s in specs}
 
-	# 仍按每个模型输出特征重要性（基于该统一特征集）
 	importance_tables: dict[str, pd.DataFrame] = {}
 	for spec in specs:
 		imp_df = compute_feature_importance_scores(
@@ -4553,15 +4423,10 @@ def main() -> int:
 		importance_tables[spec.key] = imp_df
 		imp_df.to_csv(outdir / "tables" / f"feature_importance_{spec.key}.csv", index=False, encoding="utf-8-sig")
 
-	# === 汇总所有模型的 feature_importance 到一个总表 ===
 	save_feature_importance_summary(importance_tables, outdir / "tables" / "feature_importance_summary.xlsx")
-
-	# 保留重要性示意图（每个模型一个子图）
 	save_feature_importance_grid(importance_tables, outdir / "fig" / "FS_feature_importance_grid.png")
-	# 重要性 heatmap（旧：所有模型合在一张图）；按用户要求改为“每个模型单独输出变量热图”，
-	# 因需用到预测概率（predicted value），所以在后面评估完成后再生成。
 
-	# 二、模型构建：网格搜索（10轮10折）并在训练集重拟合
+	# Phase II: Model Construction
 	best_params_rows: list[dict[str, Any]] = []
 	fitted_pipelines: dict[str, Pipeline] = {}
 	specs_by_key: dict[str, ModelSpec] = {s.key: s for s in specs}
@@ -4579,19 +4444,12 @@ def main() -> int:
 		)
 		gs.fit(X_train, y_train)
 		fitted_pipelines[spec.key] = gs.best_estimator_
-		# 构建超参数字符串（格式类似示例表）
 		params = gs.best_params_
 		if params:
-			# 移除 "model__" 前缀，格式化为 "key = value, key = value"
 			param_strs = []
 			for k, v in params.items():
 				clean_key = k.replace("model__", "")
-				if isinstance(v, float):
-					param_strs.append(f"{clean_key} = {v}")
-				elif isinstance(v, tuple):
-					param_strs.append(f"{clean_key} = {v}")
-				else:
-					param_strs.append(f"{clean_key} = {v}")
+				param_strs.append(f"{clean_key} = {v}")
 			hyperparam_str = ", ".join(param_strs)
 		else:
 			hyperparam_str = "none"
@@ -4604,12 +4462,11 @@ def main() -> int:
 	pd.DataFrame(best_params_rows).to_excel(outdir / "tables" / "best_hyperparameters.xlsx", index=False)
 	_save_training_artifacts(outdir, pre, fitted_pipelines)
 
-	# 三、模型性能评估：训练集/内部测试集/外部验证集
+	# Phase III: Model Performance Assessment
 	eval_rows: list[dict[str, Any]] = []
 	y_proba_train_by_model: dict[str, np.ndarray] = {}
 	y_proba_test_by_model: dict[str, np.ndarray] = {}
 	y_proba_external_by_model: dict[str, np.ndarray] = {}
-	# 训练集使用 OOF(out-of-fold) 概率，避免训练集指标虚高
 	oof_cv = StratifiedKFold(n_splits=args.cv_folds, shuffle=True, random_state=args.random_state)
 
 	for spec in specs:
@@ -4661,8 +4518,6 @@ def main() -> int:
 	eval_df = pd.DataFrame(eval_rows)
 	eval_df.to_excel(outdir / "tables" / "metrics_train_test_external_point_estimates.xlsx", index=False)
 
-	# 单独输出 ROC/Calibration/DCA（也会用于汇总大图）
-	# 为了在图例中展示CI，读取每个模型的CI表
 	ci_paths_by_model = {k: (outdir / "tables" / f"metrics_ci_{k}.xlsx") for k in y_proba_test_by_model.keys()}
 	ci_by_model: dict[str, dict[tuple[str, str], tuple[float, float, float]]] = {
 		k: _metric_ci_lookup(p) for k, p in ci_paths_by_model.items()
@@ -4692,7 +4547,6 @@ def main() -> int:
 	if has_external and y_external is not None and y_proba_external_by_model:
 		_plot_calibration_simple("External", y_external, y_proba_external_by_model, outdir / "fig" / "Calibration_external.png")
 
-	# 指标对比柱状图：Train / Test / External（同图展示）
 	def _metrics_bar_grid(out: Path) -> None:
 		metric_order = ["Accuracy", "AUC", "Brier", "F1", "NPV", "PPV", "Sensitivity", "Specificity"]
 		pretty = {
@@ -4720,14 +4574,11 @@ def main() -> int:
 		datasets = ["Train", "Test"] + (["External"] if (has_external and "External" in set(long_df["Dataset"])) else [])
 		long_df["Dataset"] = pd.Categorical(long_df["Dataset"], categories=datasets, ordered=True)
 
-		# 仿示例图配色：柔和的绑定颜色
-		# Train: 浅绿色, Test: 粉色, External: 浅黄色/米色
 		palette_colors = {
-			"Train": "#66C2A5",   # 浅绿色
-			"Test": "#FC8D62",    # 橙色
-			"External": "#8DA0CB",  # 浅蓝紫色
+			"Train": "#66C2A5",   # Muted light green
+			"Test": "#FC8D62",    # Muted orange
+			"External": "#8DA0CB",  # Muted blue-purple
 		}
-		# 只保留存在的数据集
 		palette = {k: v for k, v in palette_colors.items() if k in datasets}
 
 		fig, axes = plt.subplots(3, 3, figsize=(18, 13), constrained_layout=True)
@@ -4750,16 +4601,13 @@ def main() -> int:
 			ax.tick_params(axis="x", labelsize=11)
 			ax.tick_params(axis="y", labelsize=11)
 			ax.grid(True, axis="y", alpha=0.25)
-			# Remove per-panel legends; keep a single legend in the bottom-right panel.
 			leg = ax.get_legend()
 			if leg is not None:
 				leg.remove()
 
-		# 在右下角 panel 放置 legend
 		leg_ax = axes[8]
 		leg_ax.axis("off")
 		handles, labels = axes[0].get_legend_handles_labels()
-		# 格式化 label: "Train" -> "Train"（保持简洁）
 		leg_ax.legend(
 			handles,
 			labels,
@@ -4780,13 +4628,11 @@ def main() -> int:
 
 	_metrics_bar_grid(outdir / "fig" / "Metrics_bargrid.png")
 
-	# 平行线图（训练/内部测试/外部验证 单独输出）
 	_save_parallel_metrics_single(outdir / "fig" / "Metrics_parallel_train.png", "Training set", eval_df, "Train")
 	_save_parallel_metrics_single(outdir / "fig" / "Metrics_parallel_test.png", "Test set", eval_df, "Test")
 	if has_external:
 		_save_parallel_metrics_single(outdir / "fig" / "Metrics_parallel_external.png", "External set", eval_df, "External")
 
-	# 汇总拼图：按 Train / Test / External 分别输出三张
 	_make_summary_figure_single_dataset(
 		outdir / "fig" / "Summary_Train_ROC_Calibration_Metrics_DCA.png",
 		dataset_title="Training set",
@@ -4816,7 +4662,6 @@ def main() -> int:
 			ci_paths_by_model=ci_paths_by_model,
 		)
 
-	# 变量 heatmap：每个模型一张（匹配示例风格）
 	save_variable_heatmaps_by_model(
 		out_dir=outdir / "fig",
 		X_train=X_train,
@@ -4832,7 +4677,6 @@ def main() -> int:
 		y_proba_external_by_model=y_proba_external_by_model if has_external else None,
 	)
 
-	# DeLong AUC 比较表（训练集、测试集、外部验证集）
 	save_delong_comparison_tables(
 		outdir=outdir,
 		y_train=y_train,
@@ -4843,7 +4687,6 @@ def main() -> int:
 		proba_external=y_proba_external_by_model if has_external else None,
 	)
 
-	# NRI & IDI 比较表（训练集、测试集、外部验证集）
 	save_nri_idi_comparison_tables(
 		outdir=outdir,
 		y_train=y_train,
@@ -4856,7 +4699,6 @@ def main() -> int:
 		random_state=args.random_state,
 	)
 
-	# Log Loss 比较表（训练集、测试集、外部验证集）
 	save_logloss_comparison_tables(
 		outdir=outdir,
 		y_train=y_train,
@@ -4867,7 +4709,6 @@ def main() -> int:
 		proba_external=y_proba_external_by_model if has_external else None,
 	)
 
-	# DCA（按需求：不再输出双面板 DCA_train_test.png，仅输出单数据集 DCA 图）
 	thresholds = np.linspace(0.0, 0.99, 100)
 	_save_dca_single(outdir / "fig" / "DCA_train.png", "Training set", y_train, y_proba_train_by_model, thresholds)
 	_save_dca_single(outdir / "fig" / "DCA_test.png", "Test set", y_test, y_proba_test_by_model, thresholds)
@@ -4880,9 +4721,8 @@ def main() -> int:
 			thresholds,
 		)
 
-	# Hosmer–Lemeshow / Calibration 风格输出（每个模型 train/test/external 同图）
+	model_keys = list(y_proba_train_by_model.keys())
 	if has_external and y_external is not None and y_proba_external_by_model:
-		model_keys = list(y_proba_train_by_model.keys())
 		_save_hl_grid(
 			outdir / "fig" / "HL_grid.png",
 			model_keys,
@@ -4896,7 +4736,6 @@ def main() -> int:
 			random_state=args.random_state,
 		)
 	else:
-		# 无外部验证时退回 train/test 两列布局
 		_save_hl_grid_train_test_only(
 			outdir / "fig" / "HL_grid.png",
 			model_keys,
@@ -4908,7 +4747,7 @@ def main() -> int:
 			random_state=args.random_state,
 		)
 
-	# 选择最佳模型：用训练集OOF表现选择，避免“用测试集挑模型”的乐观偏差
+	# Model selection strategy: rely purely on training OOF vectors to prevent look-ahead testing optimism bias cascades
 	train_rows = eval_df[eval_df["Dataset"] == "Train"].copy()
 	best = train_rows.sort_values(["AUC", "Brier", "LogLoss"], ascending=[False, True, True]).iloc[0]
 	best_model = str(best["Model"])
@@ -4922,9 +4761,8 @@ def main() -> int:
 		encoding="utf-8",
 	)
 
-	print(f"完成。输出目录：{outdir}")
+	print(f"Execution terminated successfully. Outputs stored under root filename: {outdir}")
 
-	# SHAP（默认开启；--no_shap 可关闭）
 	if not args.no_shap:
 		_run_shap(
 			outdir=outdir,
@@ -4946,4 +4784,3 @@ def main() -> int:
 
 if __name__ == "__main__":
 	raise SystemExit(main())
-

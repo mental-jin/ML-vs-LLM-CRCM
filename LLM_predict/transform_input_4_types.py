@@ -1,16 +1,16 @@
 """
-说明 (Purpose):
-    处理并导出用于 LLM 的输入数据：
-    - 从原始 JSON 读取样本（按 id 字符串键），验证并选择指定的目标列，
-    - 支持对数值字段进行四舍五入并保存不同输出版本。
+Purpose:
+    Process and export input data for LLMs:
+    - Read samples from original JSON (keyed by ID string), validate and select specified target columns.
+    - Support rounding numerical fields and saving different output versions.
 
-可配置项 (Optional configs):
-    - `target_columns`: 目标列名列表，用于选择和验证列。
-    - `decimals` (在 `main` 中): 四舍五入小数位数。
+Optional configs:
+    - `target_columns`: List of target column names used for column selection and validation.
+    - `decimals` (in `main`): Number of decimal places for rounding.
 
-输入/输出路径 (Input/Output paths):
-    - 默认输入：`LLM/data/input_4_types/test_set.json`（可通过命令行修改）
-    - 输出示例：
+Input/Output paths:
+    - Default input: `LLM/data/input_4_types/test_set.json` (can be modified via command line)
+    - Output examples:
             - `LLM/data/input_4_types/test_set_selected.json`
             - `LLM/data/input_4_types/test_set_rounded.json`
             - `LLM/data/input_4_types/test_set_selected_rounded.json`
@@ -79,7 +79,7 @@ def validate_target_columns(data: Dict[str, Any], targets: List[str]) -> None:
     present = collect_all_keys(data)
     missing = [c for c in targets if c not in present]
     if missing:
-        raise ValueError(f"错误：在 JSON 数据中找不到以下列: {missing}")
+        raise ValueError(f"Error: The following columns could not be found in the JSON data: {missing}")
 
 
 def round_value(v: Any, decimals: int) -> Any:
@@ -121,23 +121,23 @@ def main(input_path: str,
          out_rounded: str,
          out_selected_rounded: str,
          decimals: int = 2) -> None:
-    print(f"读取：{input_path}")
+    print(f"Reading: {input_path}")
     data = load_json(input_path)
 
-    # 验证目标列在数据中存在（至少在某个样本中出现）
+    # Validate that target columns exist in data (at least appearing in one sample)
     validate_target_columns(data, target_columns)
 
-    # 1) 选取特定列名
+    # 1) Select specific column names
     selected = {k: select_columns(v, target_columns) for k, v in data.items()}
     save_json(selected, out_selected)
-    print(f"已保存选取列的 JSON: {out_selected}")
+    print(f"Saved JSON with selected columns: {out_selected}")
 
-    # 2) 将所有数值保留 decimals 位小数（保留原结构）
+    # 2) Round all numerical values to `decimals` places (keep original structure)
     rounded = {k: round_entry(v, decimals) for k, v in data.items()}
     save_json(rounded, out_rounded)
-    print(f"已保存四舍五入后的 JSON: {out_rounded}")
+    print(f"Saved rounded JSON: {out_rounded}")
 
-    # 3) 选取特定列名，且将所有数值保留 decimals 位小数
+    # 3) Select specific column names and round all numerical values to `decimals` places
     selected_rounded = {}
     for k, v in data.items():
         picked = select_columns(v, target_columns)
@@ -147,11 +147,11 @@ def main(input_path: str,
         selected_rounded[k] = picked
 
     save_json(selected_rounded, out_selected_rounded)
-    print(f"已保存选取并四舍五入的 JSON: {out_selected_rounded}")
+    print(f"Saved selected and rounded JSON: {out_selected_rounded}")
 
 
 if __name__ == '__main__':
-    # 默认路径，可在命令行中覆盖
+    # Default paths, can be overridden in command line
     input_path = 'LLM/data/input_4_types/test_set.json'
     out_selected = 'LLM/data/input_4_types/test_set_selected.json'
     out_rounded = 'LLM/data/input_4_types/test_set_rounded.json'

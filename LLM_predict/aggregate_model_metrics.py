@@ -1,12 +1,13 @@
 """
-汇总模型评估指标（accuracy）脚本
+Aggregate Model Evaluation Metrics (Accuracy) Script
 
-用途：扫描 `results/<experiment>/<model>/` 目录下的汇总文件（如 summary.json 或 summary_2p_2n.json），
-提取每个模型在各个实验中的 `accuracy` 值，生成一个聚合 JSON。
+Purpose: Scan the `results/<experiment>/<model>/` directories for summary files 
+(e.g., summary.json or summary_2p_2n.json), extract the `accuracy` value for each 
+model across different experiments, and generate an aggregated JSON.
 
-文件保存到 `results/aggregate_model_metrics.json`。
+The file is saved to `results/aggregate_model_metrics.json`.
 
-期望输出格式示例：
+Expected output format example:
 {
     "deepseek-v4-pro": {
         "1_zero_shot_naive": 0.7,
@@ -16,9 +17,9 @@
     }
 }
 
-说明：
-- 本脚本通过 `EXPERIMENT_SUMMARY_FILE` 字典确定每个实验下要读取的 summary 文件名。
-- 如果找不到文件或无法解析 `accuracy`，对应位置会写 `null`（Python 中为 None）。
+Notes:
+- This script uses the `EXPERIMENT_SUMMARY_FILE` dictionary to determine the target summary filename for each experiment.
+- If a file cannot be found or `accuracy` cannot be parsed, the value will be set to `null` (None in Python).
 """
 
 import os
@@ -90,7 +91,7 @@ def main():
     os.makedirs(RESULTS_ROOT, exist_ok=True)
     with open(out_path, 'w', encoding='utf-8') as f:
         json.dump(agg, f, ensure_ascii=False, indent=2)
-    print(f'已保存汇总文件: {out_path}')
+    print(f'Successfully saved aggregate file: {out_path}')
 
 
 if __name__ == '__main__':

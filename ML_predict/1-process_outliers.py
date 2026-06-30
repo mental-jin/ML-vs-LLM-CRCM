@@ -1,18 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-简单的 Excel 异常值处理与绘图脚本（硬编码路径）
+Simple Excel outlier processing and plotting script (Hardcoded paths)
 
-功能：
-1. 读取预设的 Excel 文件（同目录下的 data.xlsx，默认读取首个工作表）。
-2. 删除%,替换>和<前缀并尝试转为数值。>转换为1.1倍，<转换为0.9倍。
-3. 对数值型列按 IQR 方法（Q1-1.5*IQR，Q3+1.5*IQR）界定异常值，并将异常值裁剪为界限值。
-4. 默认输出分页“拼图”箱线图（4×6）：每个变量拆成 Before/After 两个小子图，增强对比；单列图可选开启。
-5. 所有列处理完成后，将修正后的数据另存为新的 Excel（output/cleaned_data.xlsx）。
+Functions:
+1. Read the preset Excel file (data.xlsx in the same directory, default to the first sheet).
+2. Remove %, replace > and < prefixes and try to convert to numeric values. 
+   > is converted to 1.1 times, < is converted to 0.9 times.
+3. Define outliers for numeric columns using the IQR method (Q1-1.5*IQR, Q3+1.5*IQR), 
+   and clip outliers to the boundary values.
+4. Default output pagination "mosaic" boxplot (4x6): each variable is split into 
+   Before/After subplots to enhance contrast; single column plots are optionally enabled.
+5. Save the modified data as a new Excel file after all columns are processed (output/cleaned_data.xlsx).
 
-说明：
-- 仅处理数值型列（非数值列跳过）。
-- 原值 list 与修正后 list 均不包含空值（NaN）；若该列无有效数值，则不生成该列图片。
-- 为保持简单，路径与参数均使用硬编码。
+Notes:
+- Only numeric columns are processed (non-numeric columns are skipped).
+- Neither the original nor the modified list contains null values (NaN); 
+   if a column has no valid numeric values, no image will be generated for it.
+- For simplicity, paths and parameters are hardcoded.
 """
 
 import os
@@ -30,30 +34,28 @@ import json
 
 from display_names import display_name as _display_name
 
-# 解决中文/全角符号在 Matplotlib 下的字体缺失问题（Windows 常见）：
-# 优先使用常见中文字体；若系统无这些字体，Matplotlib 将自动回退。
+# Resolve missing Chinese/full-width font issues in Matplotlib (common on Windows):
+# Prioritize common Chinese fonts; if not available, Matplotlib falls back automatically.
 plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'Arial Unicode MS', 'DejaVu Sans']
-plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示为方块的问题
+plt.rcParams['axes.unicode_minus'] = False  # Resolve negative sign displaying as a square box
 
-# 让整体更接近示例图（灰底+白色网格）
+# Make overall style close to example image (gray background + white grid)
 plt.style.use('ggplot')
 
-# --------------------------- 硬编码的文件与目录 ---------------------------
-# 预设 Excel 文件名：请将 data.xlsx 放到与本脚本同一目录
+# --------------------------- Hardcoded Files and Directories ---------------------------
+# Preset Excel filename: please place data.xlsx in the same directory as this script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MERGE_DIR = os.path.join(SCRIPT_DIR, 'merge')
-INPUT_EXCEL = os.path.join(MERGE_DIR, '228-show.xlsx')  # 硬编码输入
+INPUT_EXCEL = os.path.join(MERGE_DIR, '228-show.xlsx')  # Hardcoded input
 
-OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'merge_otclimit')      # 结果输出目录
+OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'merge_otclimit')      # Result output directory
 OUTPUT_EXCEL = os.path.join(OUTPUT_DIR, '228 show-cleaned_data.xlsx')
 
-# 只保留“拼图”输出（更贴近示例图）。如需恢复单列图，把它改为 True。
+# Keep only "mosaic" layout output (closer to example plot). Change to True to restore single column plots.
 SAVE_SINGLE_PLOTS = False
 
-# 可选：硬编码需要处理的列名（保证为连续数值变量）。
-# 为空列表时，默认处理所有数值型列。
-# 示例：TARGET_COLUMNS = ["身高", "体重", "BMI"]
-# TARGET_COLUMNS: List[str] = ["肿瘤最大径", "肿瘤体积"]
+# Optional: Hardcode column names to be processed (ensuring they are continuous numeric variables).
+# If empty, all numeric columns will be processed by default.
 TARGET_COLUMNS: List[str] = [
        "IgA","IgG",	"IgM",	"C3","C4","C1Q","IgE","CH50","Creatinine","Albumin","ALP","ALT",
        "AST","Direct bilirubin","GGT","LDH","Prealbumin","Glucose","AST/ALT ratio",
@@ -73,31 +75,25 @@ TARGET_COLUMNS: List[str] = [
        "Monocyte count","CRP","Iron","Reticulocyte  %","NLR","PLR","LMR","SII","PNI",
 
         "Age", "BMI", "Tumor size", "Tumor volume", "Ki67","TNLE","PLN"
-
 ]
 
-# 显式排除列（即便它们是数值列也不处理）。
+# Explicitly excluded columns (not processed even if they are numeric).
 EXCLUDE_COLUMNS: List[str] = []
 
-# 只处理连续型变量的辅助配置：
-# - 当 TARGET_COLUMNS 为空时，会在所有数值列里自动剔除“看起来像分类变量”的列（例如 0/1/2 编码）。
-# - 你也可以在这里手工排除某些列（即使它们是数值列）。
-
-
-# 自动跳过“低基数数值列”（常见为数值编码分类变量）
+# Automatically skip "low cardinality numeric columns" (commonly numerical encoded categorical variables)
 AUTO_SKIP_LOW_CARDINALITY_NUMERIC = True
 
-# 若某数值列的非空唯一值数量 <= 该阈值，则默认认为更像分类变量并跳过
+# If the count of unique non-null values in a numeric column is <= this threshold, it is treated as categorical and skipped
 LOW_CARDINALITY_MAX_UNIQUE = 8
 
-# 同时参考唯一值占比（避免样本量很大时把连续变量误判为分类）
+# Also refer to the unique value ratio to avoid misclassifying continuous variables when the sample size is large
 # unique_ratio = nunique / non_na_count
 LOW_CARDINALITY_MAX_UNIQUE_RATIO = 0.05
 
-# 创建输出目录
+# Create output directory
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# 加载列名映射（中文 -> 英文），若不存在则使用空映射
+# Load column name mapping (Chinese -> English), use empty dict if it does not exist
 MAPPING_PATH = os.path.join(MERGE_DIR, 'column_name_mapping.json')
 try:
     with open(MAPPING_PATH, 'r', encoding='utf-8') as mf:
@@ -171,20 +167,17 @@ def add_derived_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, pd.Se
 
 
 def safe_filename(name: str) -> str:
-    """将列名转为适合作为文件名的字符串（移除非法字符）。"""
-    # Windows 兼容：尽量只保留安全字符，避免因不可见字符/特殊符号导致保存失败
+    """Convert column name to a string suitable as a filename (remove illegal characters)."""
     text = unicodedata.normalize('NFKC', str(name)).strip()
-    # 仅保留字母数字与少量安全符号，其余全部替换为下划线
     text = re.sub(r'[^0-9A-Za-z._-]+', '_', text)
     text = text.strip('._-')
     if not text:
         return 'col'
-    # 避免超长文件名
     return text[:120]
 
 
 def _panel_title_for_col(col_name: str) -> str:
-    """返回用于图标题的展示名（含单位），并尽量做中英文映射。"""
+    """Return the display name (with units) for plot titles, using mapping if available."""
     norm_name = unicodedata.normalize('NFKC', str(col_name))
     mapped_name = COLUMN_NAME_MAPPING.get(norm_name, COLUMN_NAME_MAPPING.get(str(col_name), norm_name))
     return _display_name(mapped_name, mode="plot") or str(mapped_name)
@@ -212,16 +205,13 @@ def plot_boxgrid_pages(
     nrows: int = 4,
     dpi: int = 300,
 ) -> List[str]:
-    """将多个变量的 Before/After 箱线图拼成分页大图（更接近示例图）。
+    """Combine Before/After boxplots of multiple variables into paginated large grid plots.
 
-    关键点：每个变量一个小面板，但面板内拆成左右两块（Before / After），
-    让两者各自独立 y 轴范围：对比会更明显（Before 更“压缩”且极端值更突出，After 更“均匀/展开”）。
-
-    返回生成的图片路径列表。
+    Key point: Each variable has one panel, split into left/right (Before / After) 
+    with separate y-axes to maximize contrast.
     """
     os.makedirs(out_dir, exist_ok=True)
 
-    # 仅保留有有效数据的列
     valid_cols = [c for c in cols if (len(original_lists.get(c, [])) > 0 or len(corrected_lists.get(c, [])) > 0)]
     if not valid_cols:
         return []
@@ -238,7 +228,6 @@ def plot_boxgrid_pages(
     for page_idx in range((len(valid_cols) + per_page - 1) // per_page):
         chunk = valid_cols[page_idx * per_page : (page_idx + 1) * per_page]
 
-        # 更窄、更满：减小画布与边距，减少空白
         fig = plt.figure(figsize=(13.2, 8.8))
         outer = fig.add_gridspec(
             nrows,
@@ -251,7 +240,6 @@ def plot_boxgrid_pages(
             hspace=0.32,
         )
 
-        # 大图左上角 A/B/C… 标注
         fig.text(0.01, 0.99, _page_label(page_idx), ha="left", va="top", fontsize=18, fontweight="bold")
 
         for i, col in enumerate(chunk):
@@ -309,10 +297,8 @@ def plot_boxgrid_pages(
             else:
                 ax_a.axis("off")
 
-            # 省空间：右侧不显示 y tick labels
             ax_a.tick_params(axis="y", labelleft=False)
 
-            # 变量名居中：位于 Before/After 两张图的中间（用 fig.text 放在两张子图的联合 bbox 上方）
             title = _panel_title_for_col(col)
             combined = Bbox.union([ax_b.get_position(), ax_a.get_position()])
             title_x = (combined.x0 + combined.x1) / 2
@@ -336,13 +322,7 @@ def plot_boxgrid_single(
     dpi: int = 300,
     filename: str = "boxgrid_all.png",
 ) -> str | None:
-    """将所有变量的 Before/After 箱线图拼成一张大图。
-
-    - 每个变量一个面板；面板内为左右 Before/After 两个子图。
-    - 外层固定每行 ncols 个变量面板（按需求默认 4）。
-
-    返回生成图片路径；若无有效列则返回 None。
-    """
+    """Combine Before/After boxplots of all variables into a single large mosaic image."""
     os.makedirs(out_dir, exist_ok=True)
 
     valid_cols = [c for c in cols if (len(original_lists.get(c, [])) > 0 or len(corrected_lists.get(c, [])) > 0)]
@@ -352,7 +332,6 @@ def plot_boxgrid_single(
     ncols = max(1, int(ncols))
     nrows = int(np.ceil(len(valid_cols) / ncols))
 
-    # 经验尺寸：宽度固定，按行数增长高度；避免过度空白
     fig_w = 13.2
     fig_h = max(3.2, 2.05 * nrows)
     fig = plt.figure(figsize=(fig_w, fig_h))
@@ -437,7 +416,6 @@ def plot_boxgrid_single(
         title_y = min(combined.y1 + 0.006, 0.99)
         fig.text(title_x, title_y, title, ha="center", va="bottom", fontsize=8.5)
 
-    # 若最后一行不满，关闭多余面板
     total_cells = nrows * ncols
     for j in range(len(valid_cols), total_cells):
         r = j // ncols
@@ -452,15 +430,10 @@ def plot_boxgrid_single(
 
 
 def select_numeric_continuous_columns(df: pd.DataFrame) -> tuple[list[str], dict[str, str]]:
-    """Select numeric columns that look continuous.
-
-    Returns:
-        (selected_columns, skipped_reason_by_column)
-    """
+    """Select numeric columns that look continuous."""
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     skipped: dict[str, str] = {}
 
-    # 先排除用户显式指定的列
     for col in list(numeric_cols):
         if col in EXCLUDE_COLUMNS:
             numeric_cols.remove(col)
@@ -481,7 +454,6 @@ def select_numeric_continuous_columns(df: pd.DataFrame) -> tuple[list[str], dict
         nunique = int(non_na.nunique(dropna=True))
         unique_ratio = nunique / max(n, 1)
 
-        # 低基数 + 低占比：更像分类变量（例如 0/1/2 或 1~4 分级）
         if nunique <= LOW_CARDINALITY_MAX_UNIQUE and unique_ratio <= LOW_CARDINALITY_MAX_UNIQUE_RATIO:
             skipped[col] = f'low-cardinality numeric (nunique={nunique}, ratio={unique_ratio:.3f})'
             continue
@@ -492,11 +464,7 @@ def select_numeric_continuous_columns(df: pd.DataFrame) -> tuple[list[str], dict
 
 
 def compute_iqr_bounds(values: pd.Series) -> Tuple[float, float, float, float]:
-    """
-    计算 IQR 及其上下界限。
-    返回：(Q1, Q3, lower_bound, upper_bound)
-    """
-    # dropna 仅用于分位数计算，不改变原 Series
+    """Calculate IQR and its upper/lower bounds."""
     q1 = values.quantile(0.25, interpolation='linear')
     q3 = values.quantile(0.75, interpolation='linear')
     iqr = q3 - q1
@@ -506,7 +474,7 @@ def compute_iqr_bounds(values: pd.Series) -> Tuple[float, float, float, float]:
 
 
 def normalize_cell_value(value: Any) -> Any:
-    """标准化单元格值：去掉%, 处理前缀>,<并尝试转为数值。"""
+    """Normalize cell value: remove %, process > and < prefixes and try converting to float."""
     if pd.isna(value):
         return value
 
@@ -539,40 +507,24 @@ def normalize_cell_value(value: Any) -> Any:
 
 
 def process_column(series: pd.Series) -> Tuple[List[float], List[float], pd.Series]:
-    """
-    按 IQR 方法处理一列数据：
-    - 原值列表：去除空值后的值
-    - 修正列表：将异常值裁剪至界限后，再去除空值
-    - 返回修正后的 Series（保持与原索引一致）
-    """
-    # 原值（去除空值）
+    """Process a column using IQR method."""
     original_list = series.dropna().tolist()
     if len(original_list) == 0:
-        # 无有效数据，返回原样
         return [], [], series
 
-    # 计算上下界限
     q1, q3, lower, upper = compute_iqr_bounds(series.dropna())
-
-    # 使用 clip 将异常值裁剪到界限内，NaN 保持 NaN 不变
     corrected_series = series.clip(lower=lower, upper=upper)
-
-    # 修正后列表（去除空值）
     corrected_list = corrected_series.dropna().tolist()
 
     return original_list, corrected_list, corrected_series
 
 
 def plot_boxpair(col_name: str, original: List[float], corrected: List[float], save_path: str) -> None:
-    """
-    绘制并排箱线图：左侧原值、右侧修正后，保存图片。
-    """
-    # 若没有有效数据，不绘图
+    """Draw side-by-side boxplots: original on the left, modified on the right."""
     if len(original) == 0 and len(corrected) == 0:
         return
 
     fig, axes = plt.subplots(1, 2, figsize=(8.6, 4.2))
-
     display_name = _panel_title_for_col(col_name)
 
     flierprops = dict(marker="o", markerfacecolor="#ef4444", markeredgecolor="#ef4444", markersize=2.2, alpha=0.6)
@@ -626,53 +578,43 @@ def plot_boxpair(col_name: str, original: List[float], corrected: List[float], s
 
 
 def main() -> int:
-    # 基本检查：输入文件是否存在
     if not os.path.exists(INPUT_EXCEL):
-        print(f'未找到输入文件：{INPUT_EXCEL}\n')
+        print(f'Input file not found: {INPUT_EXCEL}\n')
         return 1
 
-    # 读取 Excel（默认首个工作表）
     try:
-        # 将 "/" 读作缺失值
         df = pd.read_excel(INPUT_EXCEL, sheet_name=0, na_values=['/'])
     except Exception as e:
-        print(f'读取 Excel 失败：{e}')
+        print(f'Failed to read Excel: {e}')
         return 1
 
-    # 保险起见：将形如"/"（两侧可能有空白）的内容统一视为缺失
     df.replace(r'^\s*/\s*$', np.nan, regex=True, inplace=True)
 
-    # 读取后立即清洗：去掉%以及处理以>/<开头的值
-    # pandas 新版本中 applymap 已弃用，优先使用 DataFrame.map
     try:
         df = df.map(normalize_cell_value)
     except Exception:
         df = df.applymap(normalize_cell_value)
 
-    # 增加派生列（先以数值形式加入，便于后续异常值处理/绘图；导出前再按规则写入“/”）
     df, derived_missing_masks = add_derived_columns(df)
 
-    # 列选择：若设置了 TARGET_COLUMNS，则仅处理该列表；否则处理所有数值型列
     if TARGET_COLUMNS:
-        # 仅保留在数据中存在的列名（用户保证为数值型）
         numeric_cols = [c for c in TARGET_COLUMNS if c in df.columns]
         if not numeric_cols:
-            print('TARGET_COLUMNS 中的列未在数据中找到，请检查列名。')
+            print('Columns in TARGET_COLUMNS were not found in the data, please check names.')
             return 1
     else:
         numeric_cols, skipped = select_numeric_continuous_columns(df)
         if skipped:
-            print('自动跳过疑似分类/不可处理的数值列（不会做IQR裁剪）：')
+            print('Automatically skipping numeric columns that look categorical (No IQR clipping):')
             for col, reason in sorted(skipped.items()):
                 print(f'  - {col}: {reason}')
 
         if len(numeric_cols) == 0:
-            print('未检测到数值型列，可检查数据格式或内容。')
+            print('No numeric columns detected, check data format.')
             return 0
 
     corrected_df = df.copy()
 
-    # 用于（可选）保存非空列表，若为空则不存入
     original_lists: Dict[str, List[float]] = {}
     corrected_lists: Dict[str, List[float]] = {}
 
@@ -680,26 +622,22 @@ def main() -> int:
         series = df[col]
         original_list, corrected_list, corrected_series = process_column(series)
 
-        # 仅当列表非空时才保存到 dict
         if len(original_list) > 0:
             original_lists[col] = original_list
         if len(corrected_list) > 0:
             corrected_lists[col] = corrected_list
 
-        # 写回修正后的列
         corrected_df[col] = corrected_series
 
-        # 单列图（可选，默认关闭）
         if SAVE_SINGLE_PLOTS:
             if len(original_list) > 0 or len(corrected_list) > 0:
                 img_name = f'box_{idx:02d}_{safe_filename(col)}.png'
                 img_path = os.path.join(OUTPUT_DIR, img_name)
                 plot_boxpair(str(col), original_list, corrected_list, img_path)
-                print(f'已保存箱线图：{img_path}')
+                print(f'Boxplot saved: {img_path}')
             else:
-                print(f'列 "{col}" 无有效数据，跳过绘图。')
+                print(f'Column "{col}" has no valid data, skipping plot.')
 
-    # 额外输出“拼图版”箱线图（更接近示例图风格）：每个变量一个小面板，分页 A/B/C...
     try:
         out_img = plot_boxgrid_single(
             cols=numeric_cols,
@@ -711,33 +649,29 @@ def main() -> int:
             filename="boxgrid_all.png",
         )
         if out_img:
-            print("已保存拼图箱线图（单张，4列排版）：")
+            print("Mosaic boxplot saved (Single page, 4-column layout):")
             print(f"  - {out_img}")
     except Exception as e:
-        print(f"[WARN] 拼图箱线图生成失败（不影响Excel导出）：{e}")
+        print(f"[WARN] Mosaic boxplot generation failed (does not affect Excel export): {e}")
 
-    # 保存修正后的 Excel
     try:
-        # 将派生列中“由于原始数据缺失/无效导致无法计算”的位置写入 '/'
         for col_name, miss_mask in derived_missing_masks.items():
             if col_name in corrected_df.columns:
-                # 写入字符串占位符前先转为 object，避免将来 pandas 对 float 列赋值字符串报错
                 if corrected_df[col_name].dtype != object:
                     corrected_df[col_name] = corrected_df[col_name].astype(object)
                 mask = miss_mask | corrected_df[col_name].isna()
                 corrected_df.loc[mask, col_name] = '/'
 
         corrected_df.to_excel(OUTPUT_EXCEL, index=False)
-        print(f'已保存修正后的 Excel：{OUTPUT_EXCEL}')
+        print(f'Cleaned Excel saved: {OUTPUT_EXCEL}')
     except Exception as e:
-        print(f'保存 Excel 失败：{e}')
+        print(f'Failed to save Excel: {e}')
         return 1
 
-    # 可选：简单输出有无被记录的列
     if SAVE_SINGLE_PLOTS:
-        print(f'已处理数值列：{len(numeric_cols)} 列。生成图片：{len(os.listdir(OUTPUT_DIR)) - 1} 张（含 Excel 文件除外）。')
+        print(f'Processed: {len(numeric_cols)} numeric columns. Images generated: {len(os.listdir(OUTPUT_DIR)) - 1}.')
     else:
-        print(f'已处理数值列：{len(numeric_cols)} 列。已生成拼图：{1 if "out_img" in locals() and out_img else 0} 张。')
+        print(f'Processed: {len(numeric_cols)} numeric columns. Mosaics generated: {1 if "out_img" in locals() and out_img else 0}.')
     return 0
 
 

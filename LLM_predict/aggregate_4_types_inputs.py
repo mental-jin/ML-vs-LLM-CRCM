@@ -1,10 +1,11 @@
 """
-汇总 4 种输入类型的评估结果并输出聚合 JSON
+Aggregate evaluation results of 4 input types and output aggregated JSON.
 
-用途：遍历 `results/0_4_types_inputs/<model>/` 下的四个 summary 文件，提取每个模型在
-不同输入处理方式下的 `accuracy` 值，生成一个聚合文件 `aggregate_4_types_inputs.json`。
+Purpose: Traverse the four summary files under `results/0_4_types_inputs/<model>/`, 
+extract the `accuracy` value for each model under different input processing methods, 
+and generate an aggregated file `aggregate_4_types_inputs.json`.
 
-期望输出 JSON 格式示例：
+Expected output JSON format example:
 {
     "deepseek-v4-pro": {
         "1_Original": 0.7,
@@ -14,24 +15,24 @@
     }
 }
 
-字段说明：
-- 外层键（例如 `deepseek-v4-pro`）：模型名，对应目录 `results/0_4_types_inputs/<模型名>/`。
-- 内层键（`1_Original` / `2_Selected` / `3_Rounded` / `4_Selected_Rounded`）：四种输入类型的标识。
-- 值：对应 summary 文件中的 `accuracy`（数值），若无法读取或不存在则为 `null`。
+Field Descriptions:
+- Outer key (e.g., `deepseek-v4-pro`): Model name, corresponding to the directory `results/0_4_types_inputs/<model_name>/`.
+- Inner key (`1_Original` / `2_Selected` / `3_Rounded` / `4_Selected_Rounded`): Identifier for the four input types.
+- Value: The corresponding `accuracy` (numerical value) in the summary file, or `null` if it cannot be read or does not exist.
 
-文件对应关系（脚本内常量 `FILE_MAP`）：
+File mappings (script constant `FILE_MAP`):
 - `1_Original` -> `1_Original_summary_metrics.json`
 - `2_Selected` -> `2_Selected_summary_metrics.json`
 - `3_Rounded` -> `3_Rounded_summary_metrics.json`
 - `4_Selected_Rounded` -> `4_Selected_Rounded_summary_metrics.json`
 
-输出位置：`results/0_4_types_inputs/aggregate_4_types_inputs.json`
+Output location: `results/0_4_types_inputs/aggregate_4_types_inputs.json`
 
-四种输入类型的区别：
-- `1_Original`：使用原始完整输入（不做列筛选或值变换）。
-- `2_Selected`：只保留预先选定的一组列作为模型输入，去除其他列。
-- `3_Rounded`：在原始结构上将所有数值型字段四舍五入到 2 位小数，保留全部列。
-- `4_Selected_Rounded`：先选取特定列，再对这些数值字段四舍五入到 2 位小数（选列+四舍五入）。
+Differences among the four input types:
+- `1_Original`: Uses the original complete input (no column selection or value transformation).
+- `2_Selected`: Keeps only a pre-selected set of columns as model input, removing all other columns.
+- `3_Rounded`: Rounds all numerical fields to 2 decimal places based on the original structure, retaining all columns.
+- `4_Selected_Rounded`: First selects specific columns, then rounds these numerical fields to 2 decimal places (selection + rounding).
 """
 
 import os
@@ -93,7 +94,7 @@ def main():
     out_path = os.path.join(RESULTS_DIR, 'aggregate_4_types_inputs.json')
     with open(out_path, 'w', encoding='utf-8') as f:
         json.dump(agg, f, ensure_ascii=False, indent=2)
-    print(f'已保存汇总：{out_path}')
+    print(f'Summary saved: {out_path}')
 
 
 if __name__ == '__main__':

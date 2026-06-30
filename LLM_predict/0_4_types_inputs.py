@@ -1,25 +1,30 @@
 """
 =============================================================================
-【文件输入/输出与目录结构说明】
+[File Input/Output and Directory Structure Description]
 
-1. 输入数据目录 (INPUT_DIR): 
-   路径: LLM/data/input_4_types/
-   说明: 存放 4 种处理级别的 JSON 测试数据：
-         - test_set.json (原始全量)
-         - test_set_selected.json (仅保留30列)
-         - test_set_rounded.json (数值保留2位小数)
-         - test_set_selected_rounded.json (选列 + 2位小数)
+1. Input Data Directory (INPUT_DIR): 
+   Path: LLM/data/input_4_types/
+   Description: Contains JSON test data for 4 processing levels:
+         - test_set.json (Original full data)
+         - test_set_selected.json (Retains 30 columns only)
+         - test_set_rounded.json (Numerical values rounded to 2 decimal places)
+         - test_set_selected_rounded.json (Selected columns + 2 decimal places)
 
-2. 结果输出目录 (OUTPUT_DIR): 
-   路径: LLM/data/results/0_4_types_inputs/{MODEL_NAME}/
-   说明: 脚本会自动创建此目录（如不存在）。
+2. Results Output Directory (OUTPUT_DIR): 
+   Path: LLM/data/results/0_4_types_inputs/{MODEL_NAME}/
+   Description: The script will automatically create this directory if it does not exist.
 
-3. 生成的输出文件 (OUTPUT FILES):
-   代码会遍历上述 4 种输入，为每一种实验生成 2 个专属文件，前缀与实验名对应：
-   - <实验名>_output_results.json  : 存放针对每个患者的具体预测结果、真实标签以及完整的模型API响应（包含耗时、Token使用量等）。
-   - <实验名>_summary_metrics.json : 存放该方案的宏观统计结果（总测试样本数、成功预测数、最终准确率 Accuracy）。
+3. Generated Output Files (OUTPUT FILES):
+   The code will iterate through the 4 types of inputs above and generate 2 exclusive 
+   files for each experiment, with prefixes corresponding to the experiment name:
+   - <Experiment_Name>_output_results.json  : Stores specific prediction results, true labels, 
+                                              and complete model API responses for each patient 
+                                              (including elapsed time, token usage, etc.).
+   - <Experiment_Name>_summary_metrics.json : Stores macro statistical results for the scheme 
+                                              (total test samples, successful predictions, 
+                                              and final Accuracy).
 
-   * 实验名前缀包括: 1_Original, 2_Selected, 3_Rounded, 4_Selected_Rounded
+   * Experiment name prefixes include: 1_Original, 2_Selected, 3_Rounded, 4_Selected_Rounded
 =============================================================================
 """
 
@@ -29,8 +34,8 @@ import time
 import argparse
 from openai import OpenAI
 
-# ================= 1. 初始化配置 =================
-# 请确保你的环境变量中已设置 DASHSCOPE_API_KEY
+# ================= 1. Initialize Configuration =================
+# Please ensure that DASHSCOPE_API_KEY is set in your environment variables.
 client = OpenAI(
     api_key=os.getenv("DASHSCOPE_API_KEY"),
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -42,16 +47,16 @@ def resolve_model_name(default_model_name: str) -> str:
     args = parser.parse_args()
     return args.model_name
 
-MODEL_NAME = resolve_model_name("kimi-k2.6")  # 建议使用 qwen-plus 或 qwen-max
+MODEL_NAME = resolve_model_name("kimi-k2.6")  # qwen-plus or qwen-max is recommended
 INPUT_DIR = "LLM/data/input_4_types"
 OUTPUT_DIR = f"LLM/data/results/0_4_types_inputs/{MODEL_NAME}"
 
-# 配置 4 种不同的输入数据字典
+# Configure 4 different input data dictionaries
 INPUT_FILES = {
     "1_Original": f"{INPUT_DIR}/test_set.json",
     "2_Selected": f"{INPUT_DIR}/test_set_selected.json",
     "3_Rounded": f"{INPUT_DIR}/test_set_rounded.json",
-    # "4_Selected_Rounded": f"{INPUT_DIR}/test_set_selected_rounded.json" # 和 1_zero_shot_navie.py一致
+    # "4_Selected_Rounded": f"{INPUT_DIR}/test_set_selected_rounded.json" # Consistent with 1_zero_shot_navie.py
 }
 # =================================================
 
@@ -62,7 +67,7 @@ def make_dirs(path):
 make_dirs(OUTPUT_DIR)
 
 def load_json_if_exists(file_path: str) -> dict:
-    """读取已有 JSON 结果；不存在或为空时返回空字典。"""
+    """Read existing JSON results; return an empty dictionary if it doesn't exist or is empty."""
     if not os.path.exists(file_path):
         return {}
 
@@ -74,12 +79,12 @@ def load_json_if_exists(file_path: str) -> dict:
         return {}
 
 def save_json(file_path: str, data: dict) -> None:
-    """将字典写入 JSON 文件。"""
+    """Write dictionary to a JSON file."""
     with open(file_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
 def summarize_results(results: dict) -> tuple[int, int]:
-    """统计有效样本数和正确样本数。"""
+    """Count the number of valid samples and correct samples."""
     valid_samples = 0
     correct_predictions = 0
 
@@ -102,7 +107,7 @@ def summarize_results(results: dict) -> tuple[int, int]:
     return valid_samples, correct_predictions
 
 def should_skip_existing_result(existing_result: dict) -> bool:
-    """只有历史结果已成功时才跳过；失败结果需要重新执行。"""
+    """Skip only when the historical result was successful; failed results need to be re-executed."""
     if not isinstance(existing_result, dict):
         return False
     model_output = existing_result.get("model_output", {})
@@ -110,32 +115,32 @@ def should_skip_existing_result(existing_result: dict) -> bool:
 
 def build_zero_shot_prompt(metrics: dict) -> str:
     """
-    将患者特征字典转化为自然语言 Prompt
+    Convert the patient metrics dictionary into a natural language Prompt.
     """
     metrics_str = "\n".join([f"- {k}: {v}" for k, v in metrics.items()])
     
     prompt = (
-        "请根据以下指标，预测患者未来是否会发生肿瘤远处转移。\n\n"
-        f"【患者指标】\n{metrics_str}\n\n"
-        "【输出限制】\n"
-        "请严格只输出一个数字，不要包含任何解释、标点或其他字符：\n"
-        "0 代表 未转移\n"
-        "1 代表 已转移"
+        "Based on the following metrics, please predict whether the patient will develop distant tumor metastasis in the future.\n\n"
+        f"[Patient Metrics]\n{metrics_str}\n\n"
+        "[Output Constraints]\n"
+        "Please strictly output only a single digit, without any explanation, punctuation, or other characters:\n"
+        "0 stands for No Metastasis\n"
+        "1 stands for Metastasis"
     )
     return prompt
 
 def predict_metastasis(prompt_text: str) -> dict:
     """
-    调用百炼 API，返回包含所有模型输出信息的完整字典
+    Call the Bailian API and return a complete dictionary containing all model output information.
     """
     try:
         completion = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {'role': 'system', 'content': '你是一个严谨的医疗AI助手，严格遵守输出格式要求。'},
+                {'role': 'system', 'content': 'You are a rigorous medical AI assistant, strictly complying with output format requirements.'},
                 {'role': 'user', 'content': prompt_text}
             ],
-            temperature=0.0,  # 保持输出稳定
+            temperature=0.0,  # Keep output stable
         )
         
         message = completion.choices[0].message
@@ -167,24 +172,24 @@ def predict_metastasis(prompt_text: str) -> dict:
             "error_message": str(e)
         }
 
-# ================= 2. 主执行流程 =================
+# ================= 2. Main Execution Flow =================
 if __name__ == "__main__":
     global_start_time = time.time()
     
-    # 用于记录最终横向对比结果
+    # Used to record final horizontal comparison results
     experiment_summaries = {}
 
-    # 遍历 4 种数据配置进行自动化测试
+    # Iterate through 4 data configurations for automated testing
     for exp_name, file_path in INPUT_FILES.items():
         print("=" * 60)
-        print(f"🚀 开始测试方案: {exp_name}, Model: {MODEL_NAME}")
-        print(f"📂 读取文件: {file_path}")
+        print(f"🚀 Starting test scheme: {exp_name}, Model: {MODEL_NAME}")
+        print(f"📂 Reading file: {file_path}")
         
         if not os.path.exists(file_path):
-            print(f"❌ 文件不存在，跳过此测试: {file_path}")
+            print(f"❌ File does not exist, skipping this test: {file_path}")
             continue
 
-        # 动态设置每个实验的专属输出路径
+        # Dynamically set exclusive output paths for each experiment
         output_file = f"{OUTPUT_DIR}/{exp_name}_output_results.json"
         summary_file = f"{OUTPUT_DIR}/{exp_name}_summary_metrics.json"
         final_results = load_json_if_exists(output_file)
@@ -194,21 +199,21 @@ if __name__ == "__main__":
         
         total_samples = len(patients_data)
 
-        # 已经计算过的 patient_id 直接跳过，保留历史结果并继续追加新结果
+        # Skip already calculated patient_ids, keeping historical results and appending new ones
         valid_samples, correct_predictions = summarize_results(final_results)
 
         if final_results:
-            print(f"📌 已加载历史结果 {len(final_results)} 条，后续只处理新增 patient_id。")
+            print(f"📌 Loaded {len(final_results)} historical results, only processing new patient_ids from now on.")
 
         for patient_id, data in patients_data.items():
             existing_result = final_results.get(patient_id)
             if should_skip_existing_result(existing_result):
-                print(f"  Model: {MODEL_NAME}, [ID: {patient_id}] 已存在成功结果，跳过")
+                print(f"  Model: {MODEL_NAME}, [ID: {patient_id}] Successful result already exists, skipping")
                 continue
             if patient_id in final_results:
-                print(f"  Model: {MODEL_NAME}, [ID: {patient_id}] 历史结果失败，重新执行")
+                print(f"  Model: {MODEL_NAME}, [ID: {patient_id}] Historical result failed, re-executing")
 
-            # 兼容：原始的嵌套字典结构 vs 扁平化字典结构
+            # Compatibility: original nested dictionary structure vs flattened dictionary structure
             if "results" in data and isinstance(data["results"], dict):
                 true_label = data["results"].get("Metastasis")
                 metrics = data.get("metrics", {})
@@ -238,11 +243,11 @@ if __name__ == "__main__":
                     correct_predictions += 1
                 
                 mark = "✅" if is_correct else "❌"
-                print(f"  Model: {MODEL_NAME}, [ID: {patient_id}] 真实: {true_label} | 预测: {predicted_label} {mark}")
+                print(f"  Model: {MODEL_NAME}, [ID: {patient_id}] True: {true_label} | Pred: {predicted_label} {mark}")
             else:
-                print(f"  Model: {MODEL_NAME}, [ID: {patient_id}] ⚠️ 预测异常")
+                print(f"  Model: {MODEL_NAME}, [ID: {patient_id}] ⚠️ Prediction anomaly")
 
-        # ---------------- 保存单次实验结果 ----------------
+        # ---------------- Save single experiment results ----------------
         save_json(output_file, final_results)
 
         if valid_samples > 0:
@@ -261,21 +266,21 @@ if __name__ == "__main__":
             with open(summary_file, 'w', encoding='utf-8') as f:
                 json.dump(summary_stats, f, ensure_ascii=False, indent=4)
                 
-            print(f"\n📊 Model: {MODEL_NAME}, {exp_name} 测试完成! 准确率: {accuracy:.2%}")
-            # 记录到全局汇总字典中以备表格打印
+            print(f"\n📊 Model: {MODEL_NAME}, {exp_name} test completed! Accuracy: {accuracy:.2%}")
+            # Record into global summary dictionary for table printing
             experiment_summaries[exp_name] = accuracy
         else:
-            print(f"\n⚠️ Model: {MODEL_NAME}, {exp_name} 没有有效的预测结果。")
+            print(f"\n⚠️ Model: {MODEL_NAME}, {exp_name} has no valid prediction results.")
 
-    # ================= 3. 打印最终横向对比 =================
+    # ================= 3. Print Final Horizontal Comparison =================
     global_elapsed = time.time() - global_start_time
     print("\n" + "=" * 60)
-    print(f"🏆 Model: {MODEL_NAME}, 【实验汇总报告】")
+    print(f"🏆 Model: {MODEL_NAME}, [Experiment Summary Report]")
     print("-" * 60)
-    print(f"{'输入数据类型':<25} | {'准确率 (Accuracy)'}")
+    print(f"{'Input Data Type':<25} | {'Accuracy'}")
     print("-" * 60)
     for exp, acc in experiment_summaries.items():
         print(f"{exp:<25} | {acc:.2%}")
     print("-" * 60)
-    print(f"⏱️ Model: {MODEL_NAME}, 总执行耗时: {global_elapsed:.2f} 秒")
+    print(f"⏱️ Model: {MODEL_NAME}, Total execution time: {global_elapsed:.2f} seconds")
     print("=" * 60)

@@ -1,17 +1,17 @@
 """
-说明 (Purpose):
-    结合知识增强与 Few-Shot 示例的混合策略：
-    - 在 Prompt 中同时包含详尽知识库与从候选池抽取的示例，
-    - 对固定测试集逐样本预测并保存输出与统计。
+Purpose:
+    Hybrid strategy combining knowledge augmentation and Few-Shot examples:
+    - Contains both a detailed knowledge base and examples extracted from a candidate pool in the Prompt.
+    - Performs sample-by-sample prediction on a fixed test set, saving outputs and statistics.
 
-可配置项 (Optional configs):
-    - `MODEL_NAME`, `INPUT_DIR`, `OUTPUT_DIR`, `FEW_SHOT_POS_COUNT`, `FEW_SHOT_NEG_COUNT` 等
-    - 环境变量 `DASHSCOPE_API_KEY` 用于 API 鉴权
+Optional configs:
+    - `MODEL_NAME`, `INPUT_DIR`, `OUTPUT_DIR`, `FEW_SHOT_POS_COUNT`, `FEW_SHOT_NEG_COUNT`, etc.
+    - Environment variable `DASHSCOPE_API_KEY` used for API authentication.
 
-输入/输出路径 (Input/Output paths):
-    - 输入: `LLM/data/input/few_shot_pool.json`, `LLM/data/input/test_set.json`
-    - 输出: `LLM/data/results/4_mix_few_aug/{MODEL_NAME}/output_{p}p_{n}n.json`
-    - 统计: `LLM/data/results/4_mix_few_aug/{MODEL_NAME}/summary_{p}p_{n}n.json`
+Input/Output paths:
+    - Input: `LLM/data/input/few_shot_pool.json`, `LLM/data/input/test_set.json`
+    - Output: `LLM/data/results/4_mix_few_aug/{MODEL_NAME}/output_{p}p_{n}n.json`
+    - Stats: `LLM/data/results/4_mix_few_aug/{MODEL_NAME}/summary_{p}p_{n}n.json`
 """
 
 import os
@@ -20,8 +20,8 @@ import time
 import argparse
 from openai import OpenAI
 
-# ================= 1. 初始化配置 =================
-# 请确保你的环境变量中已设置 DASHSCOPE_API_KEY
+# ================= 1. Initialize Configuration =================
+# Please ensure that DASHSCOPE_API_KEY is set in your environment variables.
 client = OpenAI(
     api_key=os.getenv("DASHSCOPE_API_KEY"),
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -35,18 +35,19 @@ def resolve_model_name(default_model_name: str) -> str:
 
 MODEL_NAME = resolve_model_name("kimi-k2.6")
 INPUT_DIR = "LLM/data/input"
-OUTPUT_DIR = f"LLM/data/results/4_mix_few_aug/{MODEL_NAME}"  # 修改了输出目录以区分实验
+OUTPUT_DIR = f"LLM/data/results/4_mix_few_aug/{MODEL_NAME}"  # Modified output directory to differentiate experiments
 
-# 【关键修改】：不再读取全量数据，而是分别读取“候选池”和“测试集”
-POOL_FILE = f"{INPUT_DIR}/few_shot_pool.json"  # 提供示例的候选池
-TEST_FILE = f"{INPUT_DIR}/test_set.json"       # 固定的测试集
+# [Key Modification]: No longer reading full data, instead separately reading "candidate pool" and "test set".
+POOL_FILE = f"{INPUT_DIR}/few_shot_pool.json"  # Candidate pool providing examples
+TEST_FILE = f"{INPUT_DIR}/test_set.json"       # Fixed test set
 
-# --- Few-Shot 核心配置 ---
-FEW_SHOT_POS_COUNT = 2  # 从候选池中提取的正样本数量（已转移，标签为1）
-FEW_SHOT_NEG_COUNT = 2  # 从候选池中提取的负样本数量（未转移，标签为0）
-# -------------------------
+# --- Few-Shot Core Configuration ---
+FEW_SHOT_POS_COUNT = 2  # Number of positive samples extracted from pool (Metastatic, label is 1)
+FEW_SHOT_NEG_COUNT = 2  # Number of negative samples extracted from pool (Non-metastatic, label is 0)
+# ------------------------------------
 
-# 为了防止不同比例的实验结果互相覆盖，建议将输出文件名加上示例数量
+# To prevent experimental results with different ratios from overwriting each other, 
+# it is recommended to add the number of examples to the output filename.
 OUTPUT_FILE = f"{OUTPUT_DIR}/output_{FEW_SHOT_POS_COUNT}p_{FEW_SHOT_NEG_COUNT}n.json"
 SUMMARY_FILE = f"{OUTPUT_DIR}/summary_{FEW_SHOT_POS_COUNT}p_{FEW_SHOT_NEG_COUNT}n.json"
 
@@ -58,7 +59,7 @@ make_dirs(OUTPUT_DIR)
 # =================================================
 
 def load_json_if_exists(file_path: str) -> dict:
-    """读取已有 JSON 结果；不存在或为空时返回空字典。"""
+    """Reads existing JSON results; returns an empty dictionary if file does not exist or is empty."""
     if not os.path.exists(file_path):
         return {}
 
@@ -70,12 +71,12 @@ def load_json_if_exists(file_path: str) -> dict:
         return {}
 
 def save_json(file_path: str, data: dict) -> None:
-    """将字典写入 JSON 文件。"""
+    """Writes a dictionary into a JSON file."""
     with open(file_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
 def summarize_results(results: dict) -> tuple[int, int]:
-    """统计有效样本数和正确样本数。"""
+    """Counts the number of valid samples and correct predictions."""
     valid_samples = 0
     correct_predictions = 0
 
@@ -98,7 +99,7 @@ def summarize_results(results: dict) -> tuple[int, int]:
     return valid_samples, correct_predictions
 
 def should_skip_existing_result(existing_result: dict) -> bool:
-    """只有历史结果已成功时才跳过；失败结果需要重新执行。"""
+    """Skips only if historical result was successful; failed results need to be re-executed."""
     if not isinstance(existing_result, dict):
         return False
     model_output = existing_result.get("model_output", {})
@@ -107,12 +108,13 @@ def should_skip_existing_result(existing_result: dict) -> bool:
 
 def get_few_shot_examples(pool_data, pos_count, neg_count):
     """
-    【全新逻辑】：从固定的候选池中，按顺序提取指定数量的正负样本作为 Prompt 示例。
+    [New Logic]: Extracts the specified number of positive and negative samples 
+    sequentially from the fixed candidate pool as Prompt examples.
     """
     pos_pool = []
     neg_pool = []
     
-    # 强制排序，确保每次取出来的示例顺序绝对一致
+    # Enforce sorting to ensure that the order of extracted examples is absolutely consistent every time.
     sorted_pool = sorted(pool_data.items(), key=lambda item: int(item[0]))
     
     for pid, data in sorted_pool:
@@ -122,7 +124,7 @@ def get_few_shot_examples(pool_data, pos_count, neg_count):
         elif label == 0:
             neg_pool.append((pid, data))
             
-    # 截取所需数量的示例
+    # Intercept the required number of examples
     few_shot_pos = pos_pool[:pos_count]
     few_shot_neg = neg_pool[:neg_count]
     
@@ -131,58 +133,57 @@ def get_few_shot_examples(pool_data, pos_count, neg_count):
 
 def build_few_shot_prompt(few_shot_examples, target_metrics: dict) -> str:
     """
-    构建包含多个示例的 Few-Shot Prompt
+    Builds a Few-Shot Prompt containing multiple examples.
     """
     base_instruction = (
-        "你是一个极其严谨的预测根治性手术后结直肠癌（CRC）患者在10年随访时间内发生异时性远处转移（MDM）预测算法系统。你的任务是根据给定的患者基线时测定的多个医学指标，"
-        "严格比对以下知识库中的权重与方向，预测该患者在10年内是否会发生远处转移。\n\n"
-        
-        "【全量特征研判知识库】\n"
-        "请逐一核对以下五大维度中的指标。注意：(↑)表示该数值升高或为阳性时增加转移风险；(↓)表示该数值降低或缺失时增加转移风险（即高值为保护因素）。\n\n"
-        
-        "第一维度：局部病理与解剖特征（局部肿瘤负荷基线）\n"
-        "- Carcinoma nodule (癌结节): 高危因子。存在(1)或数量越多，转移风险急剧上升 (↑)。\n"
-        "- PLN (阳性淋巴结数): >0 代表发生区域淋巴结转移，数值越大转移概率越高 (↑)。\n"
-        "- Vascular invasion (血管侵犯): 1(Yes) 为危险因素，代表血行转移通道初步打开 (↑)。\n"
-        "- Perineural invasion (神经侵犯): 1(Yes) 为危险因素，局部浸润强 (↑)。\n"
-        "- Differentiation grade (分化程度): G3(低分化) 增加转移概率 (↑)；G1(高分化) 转移风险低。\n"
-        "- T stage & N stage: T3-T4 或 N2 代表侵犯深，风险高 (↑)；T1-T2 或 N0 代表侵犯浅，风险低。\n"
-        "- TNLE (检出淋巴结总数): 辅助指标。预测效能一般，过低可能低估淋巴结分期 (↓)。\n"
-        "- Tumor size (肿瘤大小): 预测效能一般，越大则肿瘤负荷越重，可能促进转移 (↑)。\n"
-        "- Colonic obstruction (结肠梗阻): 预测效能一般，1(Yes) 提示晚期压迫，可能易转移 (↑)。\n\n"
-        
-        "第二维度：免疫微环境与免疫细胞（系统性防御壁垒，核心权重）\n"
-        "- Treg cells %: 最核心的免疫抑制高危指标。数值越高，免疫逃逸越严重，转移风险急剧上升 (↑)。\n"
-        "- CD4+ count, CD3+ count, NK cells %: 核心免疫防线（保护因子）。这些数值充沛代表抗肿瘤免疫力强；若显著降低，代表免疫耗竭，转移风险上升 (↓)。\n"
-        "- CD19+ B cells % & CD19+ count: 体液免疫辅助指标。数值降低通常伴随更高的转移风险 (↓)。\n\n"
-        
-        "第三维度：肿瘤标志物与细胞代谢（微转移的系统性雷达，核心权重）\n"
-        "- CEA: 最敏感的标志物，异常升高强烈提示微转移存在 (↑)。\n"
-        "- CA242, CA199: 消化道肿瘤标志物。异常升高提示转移风险 (↑)。\n"
-        "- LDH (乳酸脱氢酶): 代谢异常标志。> 171.8 U/L 时，转移风险显著增加 (↑)。\n"
-        "- Total protein (总蛋白): 营养与消耗指标。< 60 g/L (低蛋白血症) 提示恶液质，增加转移风险 (↓)。\n\n"
-        
-        "第四维度：全身炎症与细胞因子（促转移微环境）\n"
-        "- NLR (中性粒/淋巴比): 全身炎症指标。升高提示可能增加转移风险 (↑)。\n"
-        "- mGPS: 炎症与营养综合评分。> 0 时提示系统性炎症，可能增加转移风险 (↑)。\n"
-        "- IL8: 促炎细胞因子。高表达促进转移 (↑)。\n\n"
-        
-        "第五维度：基因突变与家族史（生物学潜能）\n"
-        "- KRAS mutant, BRAF mutant: 1(Yes) 为突变型，代表肿瘤侵袭性强，转移风险增加 (↑)。\n"
-        "- PMS2, MSH6: 错配修复蛋白。若为 0(Negative/缺失)，代表 dMMR/MSI-H，为保护因素，预示较低的转移风险 (↓)。\n\n"
-        
-        "【临床冲突裁决规则（极其重要）】\n"
-        "在实际临床中，指标往往是矛盾的，请严格按照以下优先级进行对抗性推理：\n"
-        "1. 即使第一维度（病理分期，如N2、脉管神经侵犯）和第五维度（KRAS突变）显示为极高危，\n"
-        "2. 但如果该患者的第二维度（免疫防线，如极低的Treg、充沛的CD3/CD4/NK细胞）和第三维度（肿瘤标志物如CEA, LDH）表现为完全正常或高度保护状态，\n"
-        "3. 这说明患者强大的系统性免疫清除了游离的微转移癌细胞。此时，“免疫与代谢的保护效力”应压倒“局部病理的危险性”。你必须综合判定为不发生转移。\n\n"
-        
-        "【输出格式限制】\n"
-        "严格只输出一个数字，绝对不要包含任何解释、分析过程、标点或其他字符：\n"
-        "0 代表 未转移 (No MDM)\n"
-        "1 代表 已转移 (MDM)"
-        
-        "以下是一些历史患者的参考示例，请学习其中的数据模式：\n"
+        "You are an extremely rigorous algorithmic system for predicting metachronous\ndistant metastasis (MDM) in patients with colorectal cancer (CRC) after\ncurative-intent resection, over a follow-up period of at least one year.\nYour task is to predict whether the patient will develop distant metastasis\nduring follow-up, based on the multiple medical indicators measured at\nbaseline, by strictly comparing them against the weights and directions\nspecified in the knowledge base below.\n\n"
+
+        "[Comprehensive Feature Interpretation Knowledge Base]\n"
+        "Examine each indicator across the following five domains. Note: (↑) indicates\nthat an elevated value or a positive result increases metastatic risk;\n(↓) indicates that a decreased value or a loss/absence increases metastatic\nrisk (i.e., higher values are protective).\n\n"
+        "Domain 1: Local Pathology and Anatomical Features (baseline local tumor burden)\n"
+        "- Carcinoma nodule: High-risk factor. Presence (1) or a higher count sharply\n  increases metastatic risk (↑).\n"
+        "- PLN (number of positive lymph nodes): >0 indicates regional nodal metastasis;\n  higher values indicate higher metastatic probability (↑).\n"
+        "- Vascular invasion: 1 (Yes) is a risk factor, indicating that a hematogenous\n  dissemination route has been opened (↑).\n"
+        "- Perineural invasion: 1 (Yes) is a risk factor, indicating strong local\n  infiltration (↑).\n"
+        "- Differentiation grade: G3 (poorly differentiated) increases metastatic\n  probability (↑); G1 (well differentiated) carries low metastatic risk.\n"
+        "- T stage & N stage: T3-T4 or N2 indicates deep invasion and high risk (↑);\n  T1-T2 or N0 indicates shallow invasion and low risk.\n"
+        "- TNLE (total number of lymph nodes examined): Auxiliary indicator. Limited\n  predictive value; an excessively low count may underestimate nodal stage (↓).\n"
+        "- Tumor size: Limited predictive value; larger size indicates heavier tumor\n  burden and may promote metastasis (↑).\n"
+        "- Colonic obstruction: Limited predictive value; 1 (Yes) suggests advanced\n  compression and possible higher metastatic tendency (↑).\n\n"
+        "Domain 2: Immune Microenvironment and Immune Cells (systemic defense barrier;\ncore weight)\n"
+        "- Treg cells (%): The most central immunosuppressive high-risk indicator.\n  Higher values indicate more severe immune evasion and sharply increased\n  metastatic risk (↑).\n"
+        "- CD4+ count, CD3+ count, NK cells (%): Core immune defenses (protective\n  factors). Abundant values indicate strong antitumor immunity; markedly\n  decreased values indicate immune exhaustion and increased metastatic risk (↓).\n"
+        "- CD19+ B cells (%) & CD19+ count: Humoral-immunity auxiliary indicators.\n  Decreased values are generally accompanied by higher metastatic risk (↓).\n\n"
+        "Domain 3: Tumor Markers and Cell Metabolism (systemic radar for micrometastasis;\ncore weight)\n"
+        "- CEA: The most sensitive marker; abnormal elevation strongly suggests the\n  presence of micrometastasis (↑).\n"
+        "- CA242, CA19-9: Gastrointestinal tumor markers; abnormal elevation suggests\n  metastatic risk (↑).\n"
+        "- LDH (lactate dehydrogenase): Marker of metabolic abnormality; >171.79 U/L\n  indicates a markedly increased metastatic risk (↑).\n"
+        "- Total protein: Nutritional and consumption indicator; <60 g/L\n  (hypoproteinemia) suggests cachexia and increased metastatic risk (↓).\n\n"
+        "Domain 4: Systemic Inflammation and Cytokines (pro-metastatic microenvironment)\n"
+        "- NLR (neutrophil-to-lymphocyte ratio): Systemic inflammation indicator;\n  elevation suggests possibly increased metastatic risk (↑).\n"
+        "- mGPS: Combined inflammation–nutrition score; >0 indicates systemic\n  inflammation and possibly increased metastatic risk (↑).\n"
+        "- IL-8: Pro-inflammatory cytokine; high expression promotes metastasis (↑).\n\n"
+        "Domain 5: Gene Mutations and Family History (biological potential)\n"
+        "- KRAS mutant, BRAF mutant: 1 (Yes) indicates a mutant type, reflecting strong\n  tumor aggressiveness and increased metastatic risk (↑).\n"
+        "- PMS2, MSH6: Mismatch repair proteins. A value of 0 (Negative/loss) indicates\n  dMMR/MSI-H, a protective factor predicting lower metastatic risk (↓).\n\n"
+
+        "[Clinical Conflict Arbitration Rules (Critically Important)]\n"
+        "In real-world practice, indicators are often contradictory. Perform\nadversarial reasoning strictly according to the following priority:\n"
+        "1. Even if Domain 1 (pathological stage, e.g., N2, vascular/perineural invasion)\n   and Domain 5 (KRAS mutation) present high-risk factors,\n"
+        "2. if the patient's Domain 2 (immune defenses, e.g., very low Treg and abundant\n   CD3+/CD4+/NK cells) and Domain 3 (tumor markers such as CEA, LDH) are\n   completely normal or highly protective,\n"
+        "3. this indicates that the patient's robust systemic immunity has cleared the\n   circulating micrometastatic tumor cells. In this case, \"the protective\n   efficacy of immunity and metabolism\" should override \"the danger of local\n   pathology,\" and the integrated judgment should be no metastasis.\n\n"
+
+        "[Execution Instruction]\n"
+        "Strictly compare the specific values of the patient below, and internally\nperform an additive–subtractive adversarial calculation between \"risk factors\"\nand \"protective factors.\" Pay particular attention to applying the above\n[Clinical Conflict Arbitration Rules] when handling contradictory indicators.\n\n"
+
+        "[Actual Patient Indicators]\n"
+        f"{metrics_str}\n\n"
+
+        "[Output Format Constraint]\n"
+        "Output strictly a single digit only. Absolutely do not include any explanation,\nanalytical process, punctuation, or other characters:\n"
+        "0 = no metastasis (No MDM)\n"
+        "1 = metastasis (MDM)"
+        "The following are reference cases from historical patients. Learn the data patterns they exhibit:\n"
     )
     
     examples_text = ""
@@ -192,19 +193,19 @@ def build_few_shot_prompt(few_shot_examples, target_metrics: dict) -> str:
         metrics_str = "\n".join([f"- {k}: {v}" for k, v in metrics.items()])
         
         examples_text += (
-            f"=== 参考示例 {i+1} ===\n"
-            f"【患者指标】\n{metrics_str}\n"
-            f"【真实转移情况】\n{label}\n\n"
+            f"=== Reference Example {i+1} ===\n"
+            f"[Patient Metrics]\n{metrics_str}\n"
+            f"[Ground-Truth Metastasis Status]\n{label}\n\n"
         )
         
     target_metrics_str = "\n".join([f"- {k}: {v}" for k, v in target_metrics.items()])
     target_text = (
-        f"=== 请预测以下目标患者 ===\n"
-        "【执行指令】\n"
-        "请严格比对下方患者的具体数值，在内心进行『风险因子』与『保护因子』的加减法对抗计算。请特别注意应用上述【临床冲突裁决规则】来处理矛盾指标。\n\n"
+        f"=== Now predict the following target patient ===\n"
+        "[Execution Instruction]\n"
+        "Strictly compare the specific values of the target patient below, integrate the historical examples, and internally perform an additive–subtractive adversarial calculation between \"risk factors\" and \"protective factors.\" Pay particular attention to applying the above [Clinical Conflict Arbitration Rules] when handling contradictory indicators.\n\n"
         
-        f"【患者指标】\n{target_metrics_str}\n"
-        f"【预测结果】\n"
+        f"[Patient Indicators]\n{target_metrics_str}\n"
+        f"[Prediction]\n"
     )
     
     return base_instruction + examples_text + target_text
@@ -212,13 +213,13 @@ def build_few_shot_prompt(few_shot_examples, target_metrics: dict) -> str:
 
 def predict_metastasis(prompt_text: str) -> dict:
     """
-    调用百炼 API，返回包含所有模型输出信息的完整字典
+    Calls the Bailian API and returns a complete dictionary containing all model output info.
     """
     try:
         completion = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {'role': 'system', 'content': '你是一个严谨的医疗AI助手，严格遵守输出格式要求。'},
+                {'role': 'system', 'content': 'You are a rigorous medical AI assistant, strictly adhering to output format requirements.'},
                 {'role': 'user', 'content': prompt_text}
             ],
             temperature=0.0,
@@ -253,19 +254,19 @@ def predict_metastasis(prompt_text: str) -> dict:
         }
 
 
-# ================= 2. 主执行流程 =================
+# ================= 2. Main Execution Flow =================
 if __name__ == "__main__":
     start_time = time.time()
     
-    # 1. 加载候选池并获取 Few-Shot 示例
-    print(f"从候选池加载示例 ({POOL_FILE})...")
+    # 1. Load candidate pool and get Few-Shot examples
+    print(f"Loading examples from candidate pool ({POOL_FILE})...")
     with open(POOL_FILE, 'r', encoding='utf-8') as f:
         pool_data = json.load(f)
         
     few_shot_examples = get_few_shot_examples(pool_data, FEW_SHOT_POS_COUNT, FEW_SHOT_NEG_COUNT)
     
-    # 2. 加载固定的测试集
-    print(f"加载固定测试集 ({TEST_FILE})...")
+    # 2. Load fixed test set
+    print(f"Loading fixed test set ({TEST_FILE})...")
     with open(TEST_FILE, 'r', encoding='utf-8') as f:
         test_samples = json.load(f)
     
@@ -274,19 +275,19 @@ if __name__ == "__main__":
     valid_samples, correct_predictions = summarize_results(final_results)
 
     if final_results:
-        print(f"📌 已加载历史结果 {len(final_results)} 条，后续只处理新增 patient_id。")
+        print(f"📌 Loaded {len(final_results)} historical records. Only new patient_ids will be processed subsequently.")
 
-    print(f"提取了 {len(few_shot_examples)} 个 Few-Shot 示例作为参考（正样本 {FEW_SHOT_POS_COUNT}，负样本 {FEW_SHOT_NEG_COUNT}）。")
-    print(f"Model: {MODEL_NAME}, 开始 Few-Shot&Prompt Aug 评估，共 {total_test_samples} 条测试数据...\n")
+    print(f"Extracted {len(few_shot_examples)} Few-Shot examples for reference (Positive: {FEW_SHOT_POS_COUNT}, Negative: {FEW_SHOT_NEG_COUNT}).")
+    print(f"Model: {MODEL_NAME}, starting Few-Shot & Prompt Aug evaluation, total test samples: {total_test_samples}...\n")
     print("-" * 50)
 
     for patient_id, data in test_samples.items():
         existing_result = final_results.get(patient_id)
         if should_skip_existing_result(existing_result):
-            print(f"Model: {MODEL_NAME}, 患者 ID: {patient_id} | 已存在成功结果，跳过")
+            print(f"Model: {MODEL_NAME}, Patient ID: {patient_id} | Successful result exists, skipping")
             continue
         if patient_id in final_results:
-            print(f"Model: {MODEL_NAME}, 患者 ID: {patient_id} | 历史结果失败，重新执行")
+            print(f"Model: {MODEL_NAME}, Patient ID: {patient_id} | Historical result failed, re-executing")
 
         metrics = data.get("metrics", {})
         true_label = data.get("results", {}).get("Metastasis")
@@ -313,25 +314,25 @@ if __name__ == "__main__":
                 correct_predictions += 1
             
             mark = "✅" if is_correct else "❌"
-            print(f"Model: {MODEL_NAME}, 患者 ID: {patient_id} | 真实值: {true_label} | 预测值: {predicted_label} {mark}")
+            print(f"Model: {MODEL_NAME}, Patient ID: {patient_id} | True Label: {true_label} | Predicted Label: {predicted_label} {mark}")
         else:
-            print(f"Model: {MODEL_NAME}, 患者 ID: {patient_id} | ⚠️ 预测异常")
+            print(f"Model: {MODEL_NAME}, Patient ID: {patient_id} | ⚠️ Prediction anomaly")
 
     print("-" * 50)
     
-    # ================= 3. 保存结果与统计 =================
+    # ================= 3. Save Results and Statistics =================
     save_json(OUTPUT_FILE, final_results)
-    print(f"\n✅ 预测结果及详细模型输出已完整保存至: {OUTPUT_FILE}")
+    print(f"\n✅ Prediction results and detailed model outputs completely saved to: {OUTPUT_FILE}")
 
     end_time = time.time()
     elapsed_time = end_time - start_time
 
     if valid_samples > 0:
         accuracy = correct_predictions / valid_samples
-        print(f"【评估完成】")
-        print(f"Model: {MODEL_NAME}, 总测试样本: {valid_samples} (成功响应)")
-        print(f"Model: {MODEL_NAME}, 正确预测数: {correct_predictions}")
-        print(f"Model: {MODEL_NAME}, Few-Shot&Prompt Aug 准确率: {accuracy:.2%}")
+        print(f"【Evaluation Completed】")
+        print(f"Model: {MODEL_NAME}, Total Test Samples: {valid_samples} (Successful responses)")
+        print(f"Model: {MODEL_NAME}, Correct Predictions: {correct_predictions}")
+        print(f"Model: {MODEL_NAME}, Few-Shot & Prompt Aug Accuracy: {accuracy:.2%}")
         
         summary_stats = {
             "experiment_type": "Few-Shot&Prompt Aug",
@@ -352,9 +353,9 @@ if __name__ == "__main__":
         
         with open(SUMMARY_FILE, 'w', encoding='utf-8') as f:
             json.dump(summary_stats, f, ensure_ascii=False, indent=4)
-        print(f"Model: {MODEL_NAME}, ✅ 统计汇总信息已保存至: {SUMMARY_FILE}\n")
+        print(f"Model: {MODEL_NAME}, ✅ Summary statistical info saved to: {SUMMARY_FILE}\n")
         
     else:
-        print(f"Model: {MODEL_NAME}, 没有有效的预测结果，请检查 API 配置或网络。")
+        print(f"Model: {MODEL_NAME}, no valid prediction results. Please check API config or network.")
         
-    print(f"总执行耗时: {elapsed_time:.2f} 秒")
+    print(f"Total elapsed time: {elapsed_time:.2f} seconds")
